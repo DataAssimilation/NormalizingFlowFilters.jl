@@ -52,7 +52,7 @@ function train_network!(filter::NormalizingFlowFilter, Xs, Ys; log_data=nothing)
     device = filter.device
     cfg = filter.training_config
 
-    N = size(Xs)[1:end-1]
+    N = size(Xs)[1:(end - 1)]
 
     # Training logs 
     loss = Vector{Float64}()
