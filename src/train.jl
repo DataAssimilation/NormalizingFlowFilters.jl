@@ -69,25 +69,32 @@ function train_network!(filter::NormalizingFlowFilter, Xs, Ys; log_data=nothing)
     (X_train, Y_train), (X_test, Y_test) = splitobs(
         (Xs, Ys); at=cfg.validation_perc, shuffle=true
     )
-    #train_loader = DataLoader(XY_train, batchsize=cfg.batch_size, shuffle=true, partial=false);
+    # train_loader = DataLoader(XY_train, batchsize=cfg.batch_size, shuffle=true, partial=false);
 
     # training & test indexes 
     n_train = size(X_train)[end]
     n_test = size(X_test)[end]
     n_batches = cld(n_train, cfg.batch_size)
-    #n_batches_test = cld(n_test, cfg.batch_size)
+    # n_batches_test = cld(n_test, cfg.batch_size)
 
-    for e in 1:(cfg.n_epochs)# epoch loop
-        idx_e = reshape(randperm(n_train), cfg.batch_size, n_batches)
+    batch_idxs = collect(1:cfg.batch_size:(n_train+1))
+    if batch_idxs[end] != n_train+1
+        append!(batch_idxs, n_train+1)
+    end
+
+    for e in 1:(cfg.n_epochs) # epoch loop
+        train_idxs = randperm(n_train)
 
         for b in 1:n_batches # batch loop
             @time begin
-                X = X_train[:, :, :, idx_e[:, b]]
-                Y = Y_train[:, :, :, idx_e[:, b]]
+                idx = train_idxs[batch_idxs[b]:(batch_idxs[b+1]-1)]
+                n_batch = length(idx)
+                X = X_train[:, :, :, idx]
+                Y = Y_train[:, :, :, idx]
                 X .+= cfg.noise_lev_x * randn(Float32, size(X))
                 Y .+= cfg.noise_lev_y * randn(Float32, size(Y))
 
-                for i in 1:(cfg.batch_size)
+                for i in 1:n_batch
                     if rand() > 0.5
                         X[:, :, :, i:i] = X[end:-1:1, :, :, i:i]
                         Y[:, :, :, i:i] = Y[end:-1:1, :, :, i:i]
@@ -98,12 +105,12 @@ function train_network!(filter::NormalizingFlowFilter, Xs, Ys; log_data=nothing)
                 Zx, Zy, lgdet = filter.network_device.forward(device(X), device(Y))
 
                 # Loss function is l2 norm 
-                append!(loss, norm(Zx)^2 / (prod(N) * cfg.batch_size))  # normalize by image size and batch size
+                append!(loss, norm(Zx)^2 / (prod(N) * n_batch))  # normalize by image size and batch size
                 append!(logdet_train, -lgdet / prod(N)) # logdet is internally normalized by batch size
 
                 # Set gradients of flow and summary network
                 #filter.network_device.backward(Zx / cfg.batch_size, Zx, Zy; Y_save=Y|> device)
-                filter.network_device.backward(Zx / cfg.batch_size, Zx, Zy)
+                filter.network_device.backward(Zx / n_batch, Zx, Zy)
 
                 for p in get_params(filter.network_device)
                     Flux.update!(filter.opt, p.data, p.grad)
