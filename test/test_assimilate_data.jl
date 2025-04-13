@@ -31,9 +31,7 @@ using Statistics: mean, var
     y_obs = zeros(Nx)
 
     # Assimilate.
-    posterior = assimilate_data(
-        filter, prior_state, prior_obs, y_obs
-    )
+    posterior = assimilate_data(filter, prior_state, prior_obs, y_obs)
 end
 
 @testset "assimilate_data 1D" begin
@@ -67,7 +65,5 @@ end
     y_obs = zeros(Nx)
 
     # Assimilate.
-    posterior = assimilate_data(
-        filter, prior_state, prior_obs, y_obs
-    )
+    posterior = assimilate_data(filter, prior_state, prior_obs, y_obs)
 end
