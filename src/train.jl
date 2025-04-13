@@ -77,7 +77,7 @@ function train_network!(filter::NormalizingFlowFilter, Xs, Ys; log_data=nothing)
     n_batches = cld(n_train, cfg.batch_size)
     # n_batches_test = cld(n_test, cfg.batch_size)
 
-    batch_idxs = collect(1:cfg.batch_size:(n_train+1))
+    batch_idxs = collect(1:cfg.batch_size:(n_train + 1))
     if batch_idxs[end] != n_train+1
         append!(batch_idxs, n_train+1)
     end
@@ -87,7 +87,7 @@ function train_network!(filter::NormalizingFlowFilter, Xs, Ys; log_data=nothing)
 
         for b in 1:n_batches # batch loop
             @time begin
-                idx = train_idxs[batch_idxs[b]:(batch_idxs[b+1]-1)]
+                idx = train_idxs[batch_idxs[b]:(batch_idxs[b + 1] - 1)]
                 n_batch = length(idx)
                 X = X_train[:, :, :, idx]
                 Y = Y_train[:, :, :, idx]
