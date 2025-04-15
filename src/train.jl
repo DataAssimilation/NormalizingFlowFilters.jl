@@ -1,6 +1,6 @@
 using Flux: Flux
 using LinearAlgebra: norm
-using MLUtils: splitobs
+using MLUtils: splitobs, obsview
 using ImageQualityIndexes: assess_ssim
 using Random: randn, randperm
 using InvertibleNetworks: clear_grad!, get_params
@@ -66,9 +66,20 @@ function train_network!(filter::NormalizingFlowFilter, Xs, Ys; log_data=nothing)
     l2_cm_test = Vector{Float64}()
 
     # Use MLutils to split into training and validation set
-    (X_train, Y_train), (X_test, Y_test) = splitobs(
-        (Xs, Ys); at=cfg.validation_perc, shuffle=true
-    )
+    num_samples = size(Xs)[end]
+    shuffle_idxs = randperm(num_samples)
+
+    train_split, test_split = splitobs(num_samples; at=cfg.validation_perc)
+
+    train_split = shuffle_idxs[train_split]
+    test_split = shuffle_idxs[test_split]
+
+    X_train = obsview(Xs, train_split)
+    Y_train = obsview(Ys, train_split)
+
+    X_test = obsview(Xs, test_split)
+    Y_test = obsview(Ys, test_split)
+
     # train_loader = DataLoader(XY_train, batchsize=cfg.batch_size, shuffle=true, partial=false);
 
     # training & test indexes 
@@ -188,12 +199,14 @@ function train_network!(filter::NormalizingFlowFilter, Xs, Ys; log_data=nothing)
                 :logdet => logdet_train,
                 :ssim_cm => ssim,
                 :l2_cm => l2_cm,
+                :split => train_split,
             ),
             :testing => Dict{Symbol,Any}(
                 :loss => loss_test,
                 :logdet => logdet_test,
-                :ssim => ssim_test,
+                :ssim_cm => ssim_test,
                 :l2_cm => l2_cm_test,
+                :split => test_split,
             ),
         )
     end

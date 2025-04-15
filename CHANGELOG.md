@@ -10,6 +10,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 
 - Support for one-dimensional inputs.
+- The training `log` now includes the indices used for the training/validation split.
+
+### Changed
+
+- Renamed `log[:testing][:ssim]` to `log[:testing][:ssim_cm]` so that it matches the
+  corresponding entry in `log[:training]`. 
 
 ## [v0.0.1] - 2024-10-18
 
