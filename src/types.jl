@@ -1,7 +1,8 @@
 using InvertibleNetworks: InvertibleNetworks, NetworkConditionalGlow
 using Flux: Flux, ClipNorm, cpu, gpu
 
-export NormalizingFlowFilter, NetworkConditionalGlow, create_optimizer, cpu, gpu, get_data, set_data!
+export NormalizingFlowFilter,
+    NetworkConditionalGlow, create_optimizer, cpu, gpu, get_data, set_data!
 
 struct NormalizingFlowFilter
     network
