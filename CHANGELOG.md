@@ -16,6 +16,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Renamed `log[:testing][:ssim]` to `log[:testing][:ssim_cm]` so that it matches the
   corresponding entry in `log[:training]`. 
+- Nicer output during training.
 
 ## [v0.0.1] - 2024-10-18
 

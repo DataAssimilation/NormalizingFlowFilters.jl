@@ -7,6 +7,10 @@ using Pkg: Pkg
 Pkg.activate(@__DIR__)
 Pkg.instantiate()
 
+using TerminalLoggers: TerminalLogger
+using Logging: global_logger
+global_logger(TerminalLogger())
+
 using CairoMakie
 using NormalizingFlowFilters
 using Random: randn, seed!

@@ -5,6 +5,7 @@ using ImageQualityIndexes: assess_ssim
 using Random: randn, randperm
 using InvertibleNetworks: clear_grad!, get_params
 using Statistics: mean
+using ProgressLogging: @withprogress, @logprogress, @progressid
 
 export train_network!, get_cm_l2_ssim, get_loss
 
@@ -54,7 +55,7 @@ function train_network!(filter::NormalizingFlowFilter, Xs, Ys; log_data=nothing)
 
     N = size(Xs)[1:(end - 1)]
 
-    # Training logs 
+    # Training logs
     loss = Vector{Float64}()
     logdet_train = Vector{Float64}()
     ssim = Vector{Float64}()
@@ -82,7 +83,7 @@ function train_network!(filter::NormalizingFlowFilter, Xs, Ys; log_data=nothing)
 
     # train_loader = DataLoader(XY_train, batchsize=cfg.batch_size, shuffle=true, partial=false);
 
-    # training & test indexes 
+    # training & test indexes
     n_train = size(X_train)[end]
     n_test = size(X_test)[end]
     n_batches = cld(n_train, cfg.batch_size)
@@ -93,11 +94,14 @@ function train_network!(filter::NormalizingFlowFilter, Xs, Ys; log_data=nothing)
         append!(batch_idxs, n_train+1)
     end
 
-    for e in 1:(cfg.n_epochs) # epoch loop
+    @withprogress name="Epochs" for e in 1:(cfg.n_epochs) # epoch loop
         train_idxs = randperm(n_train)
 
-        for b in 1:n_batches # batch loop
-            @time begin
+        _epoch_logid = @progressid
+
+        @withprogress name="Batches" for b in 1:n_batches # batch loop
+            _batch_logid = @progressid
+            begin
                 idx = train_idxs[batch_idxs[b]:(batch_idxs[b + 1] - 1)]
                 n_batch = length(idx)
                 X = X_train[:, :, :, idx]
@@ -115,7 +119,7 @@ function train_network!(filter::NormalizingFlowFilter, Xs, Ys; log_data=nothing)
                 # Forward pass of normalizing flow
                 Zx, Zy, lgdet = filter.network_device.forward(device(X), device(Y))
 
-                # Loss function is l2 norm 
+                # Loss function is l2 norm
                 append!(loss, norm(Zx)^2 / (prod(N) * n_batch))  # normalize by image size and batch size
                 append!(logdet_train, -lgdet / prod(N)) # logdet is internally normalized by batch size
 
@@ -128,28 +132,32 @@ function train_network!(filter::NormalizingFlowFilter, Xs, Ys; log_data=nothing)
                 end
                 clear_grad!(filter.network_device)
 
-                print(
-                    "Iter: epoch=",
+                message = string(
+                    "Iter:",
+                    "\n    epoch = ",
                     e,
                     "/",
                     cfg.n_epochs,
-                    ", batch=",
+                    "\n    batch = ",
                     b,
                     "/",
                     n_batches,
-                    "; f l2 = ",
+                    "\n    f l2 =  ",
                     loss[end],
-                    "; lgdet = ",
+                    "\n    lgdet = ",
                     logdet_train[end],
-                    "; f = ",
+                    "\n    f =     ",
                     loss[end] + logdet_train[end],
                     "\n",
                 )
-                Base.flush(Base.stdout)
+                @logprogress message b/n_batches _id=_batch_logid
+                if b == n_batches
+                    print(message)
+                end
             end
         end
-        # get objective mean metrics over testing batch  
-        @time l2_test_val, lgdet_test_val = get_loss(
+        # get objective mean metrics over testing batch
+        l2_test_val, lgdet_test_val = get_loss(
             filter.network_device,
             X_test,
             Y_test;
@@ -163,7 +171,7 @@ function train_network!(filter::NormalizingFlowFilter, Xs, Ys; log_data=nothing)
         append!(loss_test, l2_test_val)
 
         # get conditional mean metrics over training batch
-        @time cm_l2_train, cm_ssim_train = get_cm_l2_ssim(
+        cm_l2_train, cm_ssim_train = get_cm_l2_ssim(
             filter.network_device,
             Xs,
             Ys,
@@ -177,8 +185,8 @@ function train_network!(filter::NormalizingFlowFilter, Xs, Ys; log_data=nothing)
         append!(l2_cm, cm_l2_train)
 
         if size(X_test, 4) > 0
-            # get conditional mean metrics over testing batch  
-            @time cm_l2_test, cm_ssim_test = get_cm_l2_ssim(
+            # get conditional mean metrics over testing batch
+            cm_l2_test, cm_ssim_test = get_cm_l2_ssim(
                 filter.network_device,
                 Xs,
                 Ys,
@@ -190,6 +198,33 @@ function train_network!(filter::NormalizingFlowFilter, Xs, Ys; log_data=nothing)
             )
             append!(ssim_test, cm_ssim_test)
             append!(l2_cm_test, cm_l2_test)
+        end
+        batch_idxs
+        message = string(
+            "Iter:",
+            "\n    epoch = ",
+            e,
+            "/",
+            cfg.n_epochs,
+            "\nTraining batch average:",
+            "\n    f l2 =  ",
+            mean(loss[end-n_batches+1:end]),
+            "\n    lgdet = ",
+            mean(logdet_train[end-n_batches+1:end]),
+            "\n    f =     ",
+            mean(loss[end-n_batches+1:end] .+ logdet_train[end-n_batches+1:end]),
+            "\nValidation:",
+            "\n    f l2 =  ",
+            loss_test[end],
+            "\n    lgdet = ",
+            logdet_test[end],
+            "\n    f =     ",
+            loss_test[end] + logdet_test[end],
+            "\n",
+        )
+        @logprogress message e/cfg.n_epochs _id=_epoch_logid
+        if e == cfg.n_epochs
+            print(message)
         end
     end
     if !isnothing(log_data)
