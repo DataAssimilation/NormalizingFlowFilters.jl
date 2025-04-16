@@ -208,11 +208,13 @@ function train_network!(filter::NormalizingFlowFilter, Xs, Ys; log_data=nothing)
             cfg.n_epochs,
             "\nTraining batch average:",
             "\n    f l2 =  ",
-            mean(loss[end-n_batches+1:end]),
+            mean(loss[(end - n_batches + 1):end]),
             "\n    lgdet = ",
-            mean(logdet_train[end-n_batches+1:end]),
+            mean(logdet_train[(end - n_batches + 1):end]),
             "\n    f =     ",
-            mean(loss[end-n_batches+1:end] .+ logdet_train[end-n_batches+1:end]),
+            mean(
+                loss[(end - n_batches + 1):end] .+ logdet_train[(end - n_batches + 1):end]
+            ),
             "\nValidation:",
             "\n    f l2 =  ",
             loss_test[end],
