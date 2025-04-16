@@ -13,6 +13,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - The training `log` now includes the indices used for the training/validation split.
 - `get_data` and `set_data!` for interacting with data outside of the configurations,
   which are currently just the network weights.
+- New training parameters for resetting the network and optimizer states at the start
+  of each training session.
 
 ### Changed
 

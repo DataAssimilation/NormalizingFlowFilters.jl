@@ -3,7 +3,7 @@ using LinearAlgebra: norm
 using MLUtils: splitobs, obsview
 using ImageQualityIndexes: assess_ssim
 using Random: randn, randperm
-using InvertibleNetworks: clear_grad!, get_params
+using InvertibleNetworks: InvertibleNetworks, reset!, clear_grad!, get_params
 using Statistics: mean
 using ProgressLogging: @withprogress, @logprogress, @progressid
 
@@ -52,6 +52,16 @@ end
 function train_network!(filter::NormalizingFlowFilter, Xs, Ys; log_data=nothing)
     device = filter.device
     cfg = filter.training_config
+
+    if cfg.reset_weights
+        InvertibleNetworks.set_params!(filter.network_device, get_params(reset_network(filter.network_device)))
+    end
+
+    if cfg.reset_optimizer
+        opt = reset_optimizer(filter.opt)
+    else
+        opt = filter.opt
+    end
 
     N = size(Xs)[1:(end - 1)]
 
@@ -128,7 +138,7 @@ function train_network!(filter::NormalizingFlowFilter, Xs, Ys; log_data=nothing)
                 filter.network_device.backward(Zx / n_batch, Zx, Zy)
 
                 for p in get_params(filter.network_device)
-                    Flux.update!(filter.opt, p.data, p.grad)
+                    Flux.update!(opt, p.data, p.grad)
                 end
                 clear_grad!(filter.network_device)
 

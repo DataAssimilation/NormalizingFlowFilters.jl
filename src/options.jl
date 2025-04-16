@@ -26,6 +26,8 @@ end
     num_post_samples = 10
     validation_perc = 0.8
     n_condmean = 2
+    reset_optimizer = false
+    reset_weights = false
 end
 
 @option struct OptimizerOptions

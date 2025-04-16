@@ -2,7 +2,7 @@ using InvertibleNetworks: InvertibleNetworks, NetworkConditionalGlow
 using Flux: Flux, ClipNorm, cpu, gpu
 
 export NormalizingFlowFilter,
-    NetworkConditionalGlow, create_optimizer, cpu, gpu, get_data, set_data!
+    NetworkConditionalGlow, create_optimizer, reset_optimizer, cpu, gpu, get_data, set_data!
 
 struct NormalizingFlowFilter
     network
@@ -21,7 +21,7 @@ function NormalizingFlowFilter(
 end
 
 function InvertibleNetworks.NetworkConditionalGlow(ndims, config::ConditionalGlowOptions)
-    return NetworkConditionalGlow(
+    return  NetworkConditionalGlow(
         config.chan_x,
         config.chan_y,
         config.n_hidden,
@@ -32,8 +32,35 @@ function InvertibleNetworks.NetworkConditionalGlow(ndims, config::ConditionalGlo
     )
 end
 
+function reset_network(network::NetworkConditionalGlow)
+    n_hidden = size(network.CL[1,1].RB.W1.data)[end]
+    n_in = network.CL[1,1].C.k
+    in_split_plus_n_cond = size(network.CL[1,1].RB.W1.data)[end-1]
+    out_chan = size(network.CL[1,1].RB.W3.data)[end-1]
+    split_num = out_chan ÷ 2
+    in_split = n_in - split_num
+    n_cond = in_split_plus_n_cond - in_split
+    return NetworkConditionalGlow(
+        n_in,
+        n_cond,
+        n_hidden,
+        network.L,
+        network.K;
+        split_scales=network.split_scales,
+        ndims= ndims(network.CL[1,1].RB.W1.data) - 2,
+    )
+    return new_network
+end
+
 function create_optimizer(config)
     return Flux.Optimiser(ClipNorm(config.clipnorm_val), Flux.Optimise.Adam(config.lr))
+end
+
+function reset_optimizer(opt)
+    c, a = opt.os
+    @assert c isa ClipNorm
+    @assert a isa Flux.Optimise.Adam
+    return Flux.Optimiser(ClipNorm(c.thresh), Flux.Optimise.Adam(a.eta, a.beta, a.epsilon))
 end
 
 function get_data(filter::NormalizingFlowFilter)
