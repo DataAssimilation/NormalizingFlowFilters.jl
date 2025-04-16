@@ -43,7 +43,9 @@ using Statistics: mean, var
     @test any(p.data != p2.data for (p, p2) in zip(data_initial, data_final))
 
     set_data!(filter, data_initial)
-    @test all(p.data == p2.data for (p, p2) in zip(data_initial, deepcopy(get_data(filter))))
+    @test all(
+        p.data == p2.data for (p, p2) in zip(data_initial, deepcopy(get_data(filter)))
+    )
 
     set_data!(filter, data_final)
     @test all(p.data == p2.data for (p, p2) in zip(data_final, deepcopy(get_data(filter))))
@@ -92,7 +94,9 @@ end
     @test any(p.data != p2.data for (p, p2) in zip(data_initial, data_final))
 
     set_data!(filter, data_initial)
-    @test all(p.data == p2.data for (p, p2) in zip(data_initial, deepcopy(get_data(filter))))
+    @test all(
+        p.data == p2.data for (p, p2) in zip(data_initial, deepcopy(get_data(filter)))
+    )
 
     set_data!(filter, data_final)
     @test all(p.data == p2.data for (p, p2) in zip(data_final, deepcopy(get_data(filter))))
