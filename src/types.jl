@@ -1,7 +1,7 @@
 using InvertibleNetworks: InvertibleNetworks, NetworkConditionalGlow
 using Flux: Flux, ClipNorm, cpu, gpu
 
-export NormalizingFlowFilter, NetworkConditionalGlow, create_optimizer, cpu, gpu
+export NormalizingFlowFilter, NetworkConditionalGlow, create_optimizer, cpu, gpu, get_data, set_data!
 
 struct NormalizingFlowFilter
     network
@@ -33,4 +33,13 @@ end
 
 function create_optimizer(config)
     return Flux.Optimiser(ClipNorm(config.clipnorm_val), Flux.Optimise.Adam(config.lr))
+end
+
+function get_data(filter::NormalizingFlowFilter)
+    return InvertibleNetworks.get_params(filter.network_device)
+end
+
+function set_data!(filter::NormalizingFlowFilter, params)
+    InvertibleNetworks.set_params!(filter.network, params)
+    InvertibleNetworks.set_params!(filter.network_device, params)
 end

@@ -21,6 +21,11 @@ using Statistics: mean, var
 
     filter = NormalizingFlowFilter(network, optimizer; device, training_config)
 
+    # Get parameters.
+    data_initial = deepcopy(get_data(filter))
+    data_initial2 = deepcopy(get_data(filter))
+    @test all(p.data == p2.data for (p, p2) in zip(data_initial, data_initial2))
+
     # Ensemble members sampled from a unit normal.
     prior_state = randn(Nx, N)
 
@@ -32,6 +37,16 @@ using Statistics: mean, var
 
     # Assimilate.
     posterior = assimilate_data(filter, prior_state, prior_obs, y_obs)
+
+    # Get and set parameters.
+    data_final = deepcopy(get_data(filter))
+    @test any(p.data != p2.data for (p, p2) in zip(data_initial, data_final))
+
+    set_data!(filter, data_initial)
+    @test all(p.data == p2.data for (p, p2) in zip(data_initial, deepcopy(get_data(filter))))
+
+    set_data!(filter, data_final)
+    @test all(p.data == p2.data for (p, p2) in zip(data_final, deepcopy(get_data(filter))))
 end
 
 @testset "assimilate_data 1D" begin
@@ -55,6 +70,11 @@ end
 
     filter = NormalizingFlowFilter(network, optimizer; device, training_config)
 
+    # Get parameters.
+    data_initial = deepcopy(get_data(filter))
+    data_initial2 = deepcopy(get_data(filter))
+    @test all(p.data == p2.data for (p, p2) in zip(data_initial, data_initial2))
+
     # Ensemble members sampled from a unit normal.
     prior_state = randn(Nx, N)
 
@@ -66,4 +86,14 @@ end
 
     # Assimilate.
     posterior = assimilate_data(filter, prior_state, prior_obs, y_obs)
+
+    # Get and set parameters.
+    data_final = deepcopy(get_data(filter))
+    @test any(p.data != p2.data for (p, p2) in zip(data_initial, data_final))
+
+    set_data!(filter, data_initial)
+    @test all(p.data == p2.data for (p, p2) in zip(data_initial, deepcopy(get_data(filter))))
+
+    set_data!(filter, data_final)
+    @test all(p.data == p2.data for (p, p2) in zip(data_final, deepcopy(get_data(filter))))
 end

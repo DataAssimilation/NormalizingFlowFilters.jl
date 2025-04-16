@@ -11,6 +11,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Support for one-dimensional inputs.
 - The training `log` now includes the indices used for the training/validation split.
+- `get_data` and `set_data!` for interacting with data outside of the configurations,
+  which are currently just the network weights.
 
 ### Changed
 
