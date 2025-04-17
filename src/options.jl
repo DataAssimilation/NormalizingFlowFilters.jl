@@ -28,6 +28,7 @@ end
     n_condmean = 2
     reset_optimizer = false
     reset_weights = false
+    print_every = 1
 end
 
 @option struct OptimizerOptions

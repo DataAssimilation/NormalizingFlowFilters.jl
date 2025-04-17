@@ -142,27 +142,29 @@ function train_network!(filter::NormalizingFlowFilter, Xs, Ys; log_data=nothing)
                 end
                 clear_grad!(filter.network_device)
 
-                message = string(
-                    "Iter:",
-                    "\n    epoch = ",
-                    e,
-                    "/",
-                    cfg.n_epochs,
-                    "\n    batch = ",
-                    b,
-                    "/",
-                    n_batches,
-                    "\n    f l2 =  ",
-                    loss[end],
-                    "\n    lgdet = ",
-                    logdet_train[end],
-                    "\n    f =     ",
-                    loss[end] + logdet_train[end],
-                    "\n",
-                )
-                @logprogress message b/n_batches _id=_batch_logid
-                if b == n_batches
-                    print(message)
+                if cfg.print_every != 0 && e % cfg.print_every == 0
+                    message = string(
+                        "Iter:",
+                        "\n    epoch = ",
+                        e,
+                        "/",
+                        cfg.n_epochs,
+                        "\n    batch = ",
+                        b,
+                        "/",
+                        n_batches,
+                        "\n    f l2 =  ",
+                        loss[end],
+                        "\n    lgdet = ",
+                        logdet_train[end],
+                        "\n    f =     ",
+                        loss[end] + logdet_train[end],
+                        "\n",
+                    )
+                    @logprogress message b/n_batches _id=_batch_logid
+                    if b == n_batches
+                        print(message)
+                    end
                 end
             end
         end
@@ -209,34 +211,36 @@ function train_network!(filter::NormalizingFlowFilter, Xs, Ys; log_data=nothing)
             append!(ssim_test, cm_ssim_test)
             append!(l2_cm_test, cm_l2_test)
         end
-        batch_idxs
-        message = string(
-            "Iter:",
-            "\n    epoch = ",
-            e,
-            "/",
-            cfg.n_epochs,
-            "\nTraining batch average:",
-            "\n    f l2 =  ",
-            mean(loss[(end - n_batches + 1):end]),
-            "\n    lgdet = ",
-            mean(logdet_train[(end - n_batches + 1):end]),
-            "\n    f =     ",
-            mean(
-                loss[(end - n_batches + 1):end] .+ logdet_train[(end - n_batches + 1):end]
-            ),
-            "\nValidation:",
-            "\n    f l2 =  ",
-            loss_test[end],
-            "\n    lgdet = ",
-            logdet_test[end],
-            "\n    f =     ",
-            loss_test[end] + logdet_test[end],
-            "\n",
-        )
-        @logprogress message e/cfg.n_epochs _id=_epoch_logid
-        if e == cfg.n_epochs
-            print(message)
+
+        if cfg.print_every != 0 && e % cfg.print_every == 0
+            message = string(
+                "Iter:",
+                "\n    epoch = ",
+                e,
+                "/",
+                cfg.n_epochs,
+                "\nTraining batch average:",
+                "\n    f l2 =  ",
+                mean(loss[(end - n_batches + 1):end]),
+                "\n    lgdet = ",
+                mean(logdet_train[(end - n_batches + 1):end]),
+                "\n    f =     ",
+                mean(
+                    loss[(end - n_batches + 1):end] .+ logdet_train[(end - n_batches + 1):end]
+                ),
+                "\nValidation:",
+                "\n    f l2 =  ",
+                loss_test[end],
+                "\n    lgdet = ",
+                logdet_test[end],
+                "\n    f =     ",
+                loss_test[end] + logdet_test[end],
+                "\n",
+            )
+            @logprogress message e/cfg.n_epochs _id=_epoch_logid
+            if e == cfg.n_epochs
+                print(message)
+            end
         end
     end
     if !isnothing(log_data)
