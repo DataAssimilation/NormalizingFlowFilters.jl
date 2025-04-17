@@ -88,6 +88,10 @@ function train_network!(filter::NormalizingFlowFilter, Xs, Ys; log_data=nothing)
     X_train = obsview(Xs, train_split)
     Y_train = obsview(Ys, train_split)
 
+    if filter.network isa NetworkConditionalLinear
+        initialize!(filter.network.CN, X_train, Y_train)
+    end
+
     X_test = obsview(Xs, test_split)
     Y_test = obsview(Ys, test_split)
 
@@ -138,6 +142,9 @@ function train_network!(filter::NormalizingFlowFilter, Xs, Ys; log_data=nothing)
                 filter.network_device.backward(Zx / n_batch, Zx, Zy)
 
                 for p in get_params(filter.network_device)
+                    if isnothing(p.grad)
+                        continue
+                    end
                     Flux.update!(opt, p.data, p.grad)
                 end
                 clear_grad!(filter.network_device)

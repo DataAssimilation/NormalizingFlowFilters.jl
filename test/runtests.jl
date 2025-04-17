@@ -15,6 +15,7 @@ report_testsets = @testset ReportingTestSet "" begin
 
     @info "Running package tests."
     include("test_assimilate_data.jl")
+    include("test_conditional_linear.jl")
 
     # Set metadata for doctests.
     DocMeta.setdocmeta!(

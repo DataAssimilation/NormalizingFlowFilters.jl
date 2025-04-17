@@ -49,7 +49,6 @@ function reset_network(network::NetworkConditionalGlow)
         split_scales=network.split_scales,
         ndims= ndims(network.CL[1,1].RB.W1.data) - 2,
     )
-    return new_network
 end
 
 function create_optimizer(config)

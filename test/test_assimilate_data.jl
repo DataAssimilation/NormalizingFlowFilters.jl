@@ -19,6 +19,7 @@ using Statistics: mean, var
         validation_perc=0.63,
         reset_weights=true,
         reset_optimizer=true,
+        print_every=0,
     )
 
     filter = NormalizingFlowFilter(network, optimizer; device, training_config)

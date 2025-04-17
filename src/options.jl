@@ -1,6 +1,6 @@
 using Configurations: @option
 
-export ConditionalGlowOptions, TrainingOptions, OptimizerOptions
+export ConditionalGlowOptions, ConditionalLinearOptions, TrainingOptions, OptimizerOptions
 
 @option struct ConditionalGlowOptions
     chan_x = 3
@@ -17,6 +17,10 @@ export ConditionalGlowOptions, TrainingOptions, OptimizerOptions
 
     split_scales = false
 end
+
+@option struct ConditionalLinearOptions
+end
+
 
 @option struct TrainingOptions
     n_epochs = 32
