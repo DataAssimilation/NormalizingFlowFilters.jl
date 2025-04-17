@@ -21,7 +21,7 @@ function NormalizingFlowFilter(
 end
 
 function InvertibleNetworks.NetworkConditionalGlow(ndims, config::ConditionalGlowOptions)
-    return  NetworkConditionalGlow(
+    return NetworkConditionalGlow(
         config.chan_x,
         config.chan_y,
         config.n_hidden,
@@ -33,10 +33,10 @@ function InvertibleNetworks.NetworkConditionalGlow(ndims, config::ConditionalGlo
 end
 
 function reset_network(network::NetworkConditionalGlow)
-    n_hidden = size(network.CL[1,1].RB.W1.data)[end]
-    n_in = network.CL[1,1].C.k
-    in_split_plus_n_cond = size(network.CL[1,1].RB.W1.data)[end-1]
-    out_chan = size(network.CL[1,1].RB.W3.data)[end-1]
+    n_hidden = size(network.CL[1, 1].RB.W1.data)[end]
+    n_in = network.CL[1, 1].C.k
+    in_split_plus_n_cond = size(network.CL[1, 1].RB.W1.data)[end - 1]
+    out_chan = size(network.CL[1, 1].RB.W3.data)[end - 1]
     split_num = out_chan ÷ 2
     in_split = n_in - split_num
     n_cond = in_split_plus_n_cond - in_split
@@ -47,7 +47,7 @@ function reset_network(network::NetworkConditionalGlow)
         network.L,
         network.K;
         split_scales=network.split_scales,
-        ndims= ndims(network.CL[1,1].RB.W1.data) - 2,
+        ndims=ndims(network.CL[1, 1].RB.W1.data) - 2,
     )
     return new_network
 end
