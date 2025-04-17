@@ -54,7 +54,9 @@ function train_network!(filter::NormalizingFlowFilter, Xs, Ys; log_data=nothing)
     cfg = filter.training_config
 
     if cfg.reset_weights
-        InvertibleNetworks.set_params!(filter.network_device, get_params(reset_network(filter.network_device)))
+        InvertibleNetworks.set_params!(
+            filter.network_device, get_params(reset_network(filter.network_device))
+        )
     end
 
     if cfg.reset_optimizer
@@ -226,7 +228,8 @@ function train_network!(filter::NormalizingFlowFilter, Xs, Ys; log_data=nothing)
                 mean(logdet_train[(end - n_batches + 1):end]),
                 "\n    f =     ",
                 mean(
-                    loss[(end - n_batches + 1):end] .+ logdet_train[(end - n_batches + 1):end]
+                    loss[(end - n_batches + 1):end] .+
+                    logdet_train[(end - n_batches + 1):end],
                 ),
                 "\nValidation:",
                 "\n    f l2 =  ",
