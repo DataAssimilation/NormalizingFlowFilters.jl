@@ -44,11 +44,11 @@ function initialize!(LN::ConditionalLinearLayer, X::AbstractArray{T, Nx}, Y::Abs
     Fy = svd(dY_vecs)
     rank = 1:(min(N-1, ny))
     LN.Ux.data = Fx.U[:, rank]
-    LN.Vtx.data = Fx.Vt[:, rank]
-    LN.Sx.data = Fx.S[rank]
+    LN.Vtx.data = Fx.Vt[rank, :]
+    LN.Sx.data = Fx.S[rank] ./ sqrt(N-1)
     LN.Uy.data = Fy.U[:, rank]
-    LN.Vty.data = Fy.Vt[:, rank]
-    LN.Sy.data = Fy.S[rank]
+    LN.Vty.data = Fy.Vt[rank, :]
+    LN.Sy.data = Fy.S[rank] ./ sqrt(N-1)
     return nothing
 end
 

@@ -90,6 +90,7 @@ function train_network!(filter::NormalizingFlowFilter, Xs, Ys; log_data=nothing)
 
     if filter.network isa NetworkConditionalLinear
         initialize!(filter.network.CN, X_train, Y_train)
+        initialize!(filter.network_device.CN, X_train, Y_train)
     end
 
     X_test = obsview(Xs, test_split)

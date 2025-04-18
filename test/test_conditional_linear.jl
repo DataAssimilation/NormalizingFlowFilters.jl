@@ -1,5 +1,6 @@
 using Statistics: mean, cov
-using LinearAlgebra: norm
+using LinearAlgebra: norm, Diagonal, svd
+using Random
 
 @testset "conditional_linear" begin
     N = 37
@@ -30,6 +31,7 @@ using LinearAlgebra: norm
     @test all(p.data == p2.data for (p, p2) in zip(data_initial, data_initial2))
 
     # Ensemble members sampled from a unit normal.
+    Random.seed!(834)
     prior_state = randn(Nx, N)
 
     # Identity observation operator with noise.
@@ -38,8 +40,7 @@ using LinearAlgebra: norm
     # Covariance should be nonzero.
     B_xy = cov(prior_state, prior_obs; dims=2)
     B_y = cov(prior_obs; dims=2)
-    @show norm(B_xy)
-    @test norm(B_xy) > 1e-2
+    @test norm(B_xy) > 1
 
     # True state is the mean of the prior.
     y_obs = zeros(Nx)
@@ -47,12 +48,16 @@ using LinearAlgebra: norm
     # Assimilate.
     posterior = assimilate_data(estimator, prior_state, prior_obs, y_obs)
 
+    # Cross-covariance with observation should be zero.
+    B_zy = cov(posterior, prior_obs; dims=2)
+    @test norm(B_zy) < 1e-5
+
+    # Compare to expected solution.
     z = prior_state .- B_xy * (B_y \ prior_obs)
+    @test norm(cov(posterior)) ≈ norm(cov(z))
     @test posterior ≈ z
 
-    # Covariance should be zero.
-    B_zy = cov(posterior, prior_obs; dims=2)
-    @show norm(B_zy)
+    B_zy = cov(z, prior_obs; dims=2)
     @test norm(B_zy) < 1e-3
 
     # Get and set parameters.

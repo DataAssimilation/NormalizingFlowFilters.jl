@@ -22,18 +22,23 @@ end
 function draw_posterior_samples(
     G, y, X, Y, size_x; device=gpu, num_samples, batch_size, log_data::T_LOG=nothing
 )
+    batch_size = min(batch_size, num_samples)
     X_forward = device(randn(Float64, size_x[1:(end - 1)]..., batch_size))
     y_r = reshape(cpu(y), 1, 1, :, 1)
     Y_train_latent_repeat = device(repeat(y_r, 1, 1, 1, batch_size))
     Zx_fixed_train, Zy_fixed_train, _ = G.forward(X_forward, Y_train_latent_repeat)
 
     X_post = zeros(Float32, size_x[1:(end - 1)]..., num_samples)
-    for i in 1:div(num_samples, batch_size)
-        X_forward_i = X[:, :, :, ((i - 1) * batch_size + 1):(i * batch_size)]
-        Y_forward_i = Y[:, :, :, ((i - 1) * batch_size + 1):(i * batch_size)]
+    for i in 1:cld(num_samples, batch_size)
+        bi_begin = (i - 1) * batch_size + 1
+        bi_end = min((i * batch_size), num_samples)
+        bis = bi_begin:bi_end
+        X_forward_i = X[:, :, :, bis]
+        Y_forward_i = Y[:, :, :, bis]
         Zx_fixed_train_i, _, _ = G.forward(device(X_forward_i), device(Y_forward_i))
-        X_post[:, :, :, ((i - 1) * batch_size + 1):(i * batch_size)] = cpu(
-            G.inverse(Zx_fixed_train_i, Zy_fixed_train)
+        Zy_fixed_train_i = Zy_fixed_train[:, :, :, 1:(bi_end-bi_begin+1)]
+        X_post[:, :, :,bis] = cpu(
+            G.inverse(Zx_fixed_train_i, Zy_fixed_train_i)
         )
     end
     return X_post
