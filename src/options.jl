@@ -39,5 +39,6 @@ end
     lr = 1.0f-3
     momentum = (0.9, 0.999)
     epsilon = 1.0f-8
+    method = "adam"
     clipnorm_val = 3.0f0
 end

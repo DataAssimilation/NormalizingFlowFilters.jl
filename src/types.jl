@@ -52,15 +52,28 @@ function reset_network(network::NetworkConditionalGlow)
 end
 
 function create_optimizer(config)
-    adam = Flux.Optimise.Adam(config.lr, config.momentum, config.epsilon)
-    return Flux.Optimiser(ClipNorm(config.clipnorm_val), adam)
+    if config.method == "adam"
+        a = Flux.Optimise.Adam(config.lr, config.momentum, config.epsilon)
+    elseif config.method == "descent"
+        a = Flux.Optimise.Descent(config.lr)
+    else
+        error("Unknown optimizer method: $(config.method)")
+    end
+    return Flux.Optimiser(ClipNorm(config.clipnorm_val), a)
 end
 
 function reset_optimizer(opt)
     c, a = opt.os
     @assert c isa ClipNorm
-    @assert a isa Flux.Optimise.Adam
-    return Flux.Optimiser(ClipNorm(c.thresh), Flux.Optimise.Adam(a.eta, a.beta, a.epsilon))
+    c = ClipNorm(c.thresh)
+    if a isa Flux.Optimise.Adam
+        a = Flux.Optimise.Adam(a.eta, a.beta, a.epsilon)
+    elseif a isa Flux.Optimise.Descent
+        a = Flux.Optimise.Descent(a.eta)
+    else
+        error("Unknown optimizer type: $(typeof(opt))")
+    end
+    return Flux.Optimiser(c, a)
 end
 
 function get_data(filter::NormalizingFlowFilter)
