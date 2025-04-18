@@ -52,7 +52,8 @@ function reset_network(network::NetworkConditionalGlow)
 end
 
 function create_optimizer(config)
-    return Flux.Optimiser(ClipNorm(config.clipnorm_val), Flux.Optimise.Adam(config.lr))
+    adam = Flux.Optimise.Adam(config.lr, config.momentum, config.epsilon)
+    return Flux.Optimiser(ClipNorm(config.clipnorm_val), adam)
 end
 
 function reset_optimizer(opt)

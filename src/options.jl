@@ -37,5 +37,7 @@ end
 
 @option struct OptimizerOptions
     lr = 1.0f-3
+    momentum = (0.9, 0.999)
+    epsilon = 1.0f-8
     clipnorm_val = 3.0f0
 end
