@@ -84,3 +84,7 @@ function set_data!(filter::NormalizingFlowFilter, params)
     InvertibleNetworks.set_params!(filter.network, params)
     InvertibleNetworks.set_params!(filter.network_device, params)
 end
+
+function get_network_gradients(filter::NormalizingFlowFilter)
+    return InvertibleNetworks.get_grads(filter.network_device)
+end

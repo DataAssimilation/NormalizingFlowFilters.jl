@@ -1,6 +1,6 @@
 using Configurations: @option
 
-export ConditionalGlowOptions, ConditionalLinearOptions, TrainingOptions, OptimizerOptions
+export ConditionalGlowOptions, ConditionalSVDOptions, ConditionalLinearOptions, TrainingOptions, OptimizerOptions
 
 @option struct ConditionalGlowOptions
     chan_x = 3
@@ -18,7 +18,11 @@ export ConditionalGlowOptions, ConditionalLinearOptions, TrainingOptions, Optimi
     split_scales = false
 end
 
+@option struct ConditionalSVDOptions
+end
+
 @option struct ConditionalLinearOptions
+    random_init=false
 end
 
 
