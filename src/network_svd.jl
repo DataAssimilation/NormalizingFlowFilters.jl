@@ -36,7 +36,7 @@ function InvertibleNetworks.backward(ΔX::AbstractArray{T, NX}, X::AbstractArray
     return ΔZ, Z, ΔY
 end
 
-function NetworkConditionalSVD(config::ConditionalLinearOptions)
+function NetworkConditionalSVD(config::ConditionalSVDOptions)
     return NetworkConditionalSVD()
 end
 

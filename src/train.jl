@@ -135,7 +135,7 @@ function train_network!(filter::NormalizingFlowFilter, Xs, Ys; log_data=nothing)
                 Zx, Zy, lgdet = filter.network_device.forward(device(X), device(Y))
 
                 # Loss function is l2 norm
-                append!(loss, norm(Zx)^2 / (prod(N) * n_batch))  # normalize by image size and batch size
+                append!(loss, 0.5 * norm(Zx)^2 / (prod(N) * n_batch))  # normalize by image size and batch size
                 append!(logdet_train, -lgdet / prod(N)) # logdet is internally normalized by batch size
 
                 # Set gradients of flow and summary network

@@ -3,7 +3,7 @@ export ConditionalLinearLayer
 using InvertibleNetworks: InvertibleNetworks, NeuralNetLayer, Parameter, glorot_uniform
 using Statistics: cov
 import Flux
-using LinearAlgebra: pinv, cholesky, tr, tril, diagind, Diagonal
+using LinearAlgebra: pinv, cholesky, tr, tril, diagind, Diagonal, UniformScaling
 
 
 """
@@ -61,7 +61,7 @@ function initialize!(LN::ConditionalLinearLayer, X::AbstractArray{T, Nx}, Y::Abs
     B_xy = cov(X_vecs, Y_vecs; dims=2)
     B_y = cov(Y_vecs; dims=2)
     P_y = pinv(B_y)
-    A = pinv(cholesky(B_x - B_xy * P_y * B_xy').U)
+    A = pinv(cholesky(B_x - B_xy * P_y * B_xy' + UniformScaling(eps(T))).U)
     LN.B.data = - A * B_xy * P_y
     LN.c.data = - A * μ_x + LN.B.data * μ_y
     LN.A_free.data = A
@@ -85,13 +85,16 @@ function ConditionalLinearLayer_forward(X::AbstractArray{T, Nx}, Y::AbstractArra
     return Z
 end
 
+"""
+Returns f(X; Y) and its Jacobian's log determinant. The log determinant is averaged over the batch dimension.
+"""
 function ConditionalLinearLayer_forward_logdet(X::AbstractArray{T, Nx}, Y::AbstractArray{T, Ny}, A_free, B, c) where {T, Nx, Ny}
     N = size(X, Nx)
     X_vecs = reshape(X, :, N)
     Y_vecs = reshape(Y, :, N)
     A = tril(A_free, -1) + Diagonal(exp.(A_free[diagind(A_free)]))
     Z = A * X_vecs .+ B * Y_vecs .+ c
-    return Z, tr(A_free) / N
+    return Z, tr(A_free)
 end
 
 function InvertibleNetworks.inverse(Z::AbstractArray{T, Nx}, Y::AbstractArray{T, Ny}, LN::ConditionalLinearLayer) where {T, Nx, Ny}
@@ -113,7 +116,6 @@ function InvertibleNetworks.backward(ΔZ::AbstractArray{T, Nx}, Z::AbstractArray
         Δlgdet = T(-1)
         _, forward_pullback = Flux.pullback(ConditionalLinearLayer_forward_logdet, X, Y, LN.A_free.data, LN.B.data, LN.c.data)
         ΔX, ΔY, ΔA_free, ΔB, Δc = forward_pullback((ΔZ, Δlgdet))
-        @show "Doing logdet" ΔA_free
     else
         _, forward_pullback = Flux.pullback(ConditionalLinearLayer_forward, X, Y, LN.A_free.data, LN.B.data, LN.c.data)
         ΔX, ΔY, ΔA_free, ΔB, Δc = forward_pullback(ΔZ)
