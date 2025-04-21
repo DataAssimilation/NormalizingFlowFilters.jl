@@ -88,9 +88,9 @@ function train_network!(filter::NormalizingFlowFilter, Xs, Ys; log_data=nothing)
     X_train = obsview(Xs, train_split)
     Y_train = obsview(Ys, train_split)
 
-    if filter.network isa NetworkConditionalLinear || filter.network isa NetworkConditionalSVD
-        initialize!(filter.network.CN, X_train, Y_train)
-        initialize!(filter.network_device.CN, X_train, Y_train)
+    if filter.network isa NetworkConditionalLinear || filter.network isa NetworkConditionalSVD || filter.network isa NetworkConditionalLinearGlow
+        initialize!(filter.network.LN, X_train, Y_train)
+        initialize!(filter.network_device.LN, X_train, Y_train)
     end
 
     X_test = obsview(Xs, test_split)

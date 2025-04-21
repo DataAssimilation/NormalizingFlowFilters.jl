@@ -17,6 +17,8 @@ report_testsets = @testset ReportingTestSet "" begin
     include("test_assimilate_data.jl")
     include("test_conditional_linear.jl")
     include("test_conditional_svd.jl")
+    include("test_conditional_glow.jl")
+    include("test_conditional_linear_glow.jl")
 
     # Set metadata for doctests.
     DocMeta.setdocmeta!(

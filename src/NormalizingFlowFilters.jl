@@ -6,11 +6,13 @@ module NormalizingFlowFilters
 
 include("options.jl")
 include("types.jl")
+include("activations.jl")
 include("assimilate_data.jl")
 include("train.jl")
 include("layer_conditional_linear.jl")
 include("network_linear.jl")
 include("layer_conditional_svd.jl")
 include("network_svd.jl")
+include("network_linear_glow.jl")
 
 end # module NormalizingFlowFilters

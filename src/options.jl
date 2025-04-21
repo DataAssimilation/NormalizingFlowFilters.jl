@@ -1,6 +1,7 @@
 using Configurations: @option
 
-export ConditionalGlowOptions, ConditionalSVDOptions, ConditionalLinearOptions, TrainingOptions, OptimizerOptions
+export ConditionalGlowOptions, ConditionalSVDOptions, ConditionalLinearOptions, TrainingOptions,
+        OptimizerOptions, ActivationOptions, ResidualBlockOptions, ConditionalLinearGlowOptions
 
 @option struct ConditionalGlowOptions
     chan_x = 3
@@ -16,6 +17,25 @@ export ConditionalGlowOptions, ConditionalSVDOptions, ConditionalLinearOptions, 
     n_hidden = 8
 
     split_scales = false
+
+    residual = ResidualBlockOptions()
+
+    positive_activation = ActivationOptions(type="sigmoid")
+end
+
+@option struct ActivationOptions
+    type = "relu"
+end
+
+@option struct ResidualBlockOptions
+    activation = ActivationOptions(type="relu")
+    k1 = 3 # kernel size along each dimension for first and third convolutions.
+    p1 = 1 # padding for first and third convolutions.
+    s1 = 1 # strides for the first and third convolutions.
+
+    k2 = 1 # kernel size along each dimension for second convolution.
+    p2 = 0 # padding for second convolution.
+    s2 = 1 # strides for the second convolution.
 end
 
 @option struct ConditionalSVDOptions
@@ -25,6 +45,10 @@ end
     random_init=false
 end
 
+@option struct ConditionalLinearGlowOptions
+    ln_config = ConditionalLinearOptions()
+    gn_config = ConditionalGlowOptions()
+end
 
 @option struct TrainingOptions
     n_epochs = 32

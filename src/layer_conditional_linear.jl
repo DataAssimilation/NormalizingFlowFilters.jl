@@ -7,7 +7,8 @@ using LinearAlgebra: pinv, cholesky, tr, tril, diagind, Diagonal, UniformScaling
 
 
 """
-This layer computes Ax + By + c where we A is lower triangular with positive diagonal.
+This layer computes activation(Ax + By + c) where we A is lower triangular with positive
+diagonal, and the activation function is invertible.
 """
 mutable struct ConditionalLinearLayer <: NeuralNetLayer
     A_free::Parameter
@@ -109,16 +110,18 @@ end
 
 function InvertibleNetworks.backward(ΔZ::AbstractArray{T, Nx}, Z::AbstractArray{T, Nx}, Y::AbstractArray{T, Ny}, LN::ConditionalLinearLayer) where {T, Nx, Ny}
     X = InvertibleNetworks.inverse(Z, Y, LN)
+    N = size(ΔZ, Nx)
+    ΔZ_vecs = reshape(ΔZ, :, N)
     if LN.logdet
         # log det terms are summed, negated, and averaged over batch in loss function.
         # So the derivative of the loss with respect to this log det term is -1/N,
         #  but we already took care of the N in forward_logdet. 
         Δlgdet = T(-1)
         _, forward_pullback = Flux.pullback(ConditionalLinearLayer_forward_logdet, X, Y, LN.A_free.data, LN.B.data, LN.c.data)
-        ΔX, ΔY, ΔA_free, ΔB, Δc = forward_pullback((ΔZ, Δlgdet))
+        ΔX, ΔY, ΔA_free, ΔB, Δc = forward_pullback((ΔZ_vecs, Δlgdet))
     else
         _, forward_pullback = Flux.pullback(ConditionalLinearLayer_forward, X, Y, LN.A_free.data, LN.B.data, LN.c.data)
-        ΔX, ΔY, ΔA_free, ΔB, Δc = forward_pullback(ΔZ)
+        ΔX, ΔY, ΔA_free, ΔB, Δc = forward_pullback(ΔZ_vecs)
     end
 
     LN.A_free.grad = ΔA_free
