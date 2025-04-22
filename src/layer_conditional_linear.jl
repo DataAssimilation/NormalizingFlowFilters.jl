@@ -93,7 +93,7 @@ function ConditionalLinearLayer_forward_logdet(X::AbstractArray{T, Nx}, Y::Abstr
     N = size(X, Nx)
     X_vecs = reshape(X, :, N)
     Y_vecs = reshape(Y, :, N)
-    A = tril(A_free, -1) + Diagonal(exp.(A_free[diagind(A_free)]))
+    A = tril(A_free, -1) + Diagonal(exp.(A_free[diagind(A_free)]) .+ eps(T))
     Z = A * X_vecs .+ B * Y_vecs .+ c
     return Z, tr(A_free)
 end
@@ -103,7 +103,7 @@ function InvertibleNetworks.inverse(Z::AbstractArray{T, Nx}, Y::AbstractArray{T,
     Z_vecs = reshape(Z, :, N)
     Y_vecs = reshape(Y, :, N)
     A_free = LN.A_free.data
-    A = tril(A_free, -1) + Diagonal(exp.(A_free[diagind(A_free)]))
+    A = tril(A_free, -1) + Diagonal(exp.(A_free[diagind(A_free)]) .+ eps(T))
     X = A \ (Z_vecs .- LN.B.data * Y_vecs .- LN.c.data)
     return X
 end
