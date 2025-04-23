@@ -61,6 +61,7 @@ end
     reset_optimizer = false
     reset_weights = false
     print_every = 1
+    save_best = true
     early_stopping = EarlyStoppingOptions()
 end
 

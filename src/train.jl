@@ -111,6 +111,9 @@ function train_network!(filter::NormalizingFlowFilter, Xs, Ys; log_data=nothing)
         append!(batch_idxs, n_train+1)
     end
 
+    best_params = get_params(filter.network_device)
+    best_loss = nothing
+
     @withprogress name="Epochs" for e in 1:(cfg.n_epochs) # epoch loop
         train_idxs = randperm(n_train)
 
@@ -179,6 +182,12 @@ function train_network!(filter::NormalizingFlowFilter, Xs, Ys; log_data=nothing)
             end
         end
         push!(loss_epochs, mean(loss[end-n_batches+1:end] .+ logdet_train[end-n_batches+1:end]))
+        if cfg.save_best
+            if isnothing(best_loss) || loss_epochs[end] < best_loss
+                best_loss = loss_epochs[end]
+                best_params = get_params(filter.network_device)
+            end
+        end
 
         # get objective mean metrics over testing batch
         l2_test_val, lgdet_test_val = get_loss(
@@ -290,4 +299,9 @@ function train_network!(filter::NormalizingFlowFilter, Xs, Ys; log_data=nothing)
             ),
         )
     end
+
+    if cfg.save_best
+        InvertibleNetworks.set_params!(filter.network_device, best_params)
+    end
+    return nothing
 end
