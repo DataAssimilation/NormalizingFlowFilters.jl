@@ -76,6 +76,8 @@ function train_network!(filter::NormalizingFlowFilter, Xs, Ys; log_data=nothing)
     ssim_test = Vector{Float64}()
     l2_cm_test = Vector{Float64}()
 
+    loss_epochs = Vector{Float64}()
+
     # Use MLutils to split into training and validation set
     num_samples = size(Xs)[end]
     shuffle_idxs = randperm(num_samples)
@@ -176,6 +178,8 @@ function train_network!(filter::NormalizingFlowFilter, Xs, Ys; log_data=nothing)
                 end
             end
         end
+        push!(loss_epochs, mean(loss[end-n_batches+1:end] .+ logdet_train[end-n_batches+1:end]))
+
         # get objective mean metrics over testing batch
         l2_test_val, lgdet_test_val = get_loss(
             filter.network_device,
@@ -248,6 +252,23 @@ function train_network!(filter::NormalizingFlowFilter, Xs, Ys; log_data=nothing)
             @logprogress message e/cfg.n_epochs _id=_epoch_logid
             if e == cfg.n_epochs
                 print(message)
+            end
+        end
+
+        if cfg.early_stopping.active
+            early_stop = false
+            for (de, prop, delta) in cfg.early_stopping.look_backs
+                if e > de
+                    # Check for loss not improving for some number of epochs.
+                    loss_difference = loss_epochs[end] .- loss_epochs[end-de:end-1]
+                    if mean(loss_difference .>= delta) > prop
+                        early_stop = true
+                        break
+                    end
+                end
+            end
+            if early_stop
+                break
             end
         end
     end

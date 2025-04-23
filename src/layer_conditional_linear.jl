@@ -63,8 +63,10 @@ function initialize!(LN::ConditionalLinearLayer, X::AbstractArray{T, Nx}, Y::Abs
     B_y = cov(Y_vecs; dims=2)
     P_y = pinv(B_y)
     A = pinv(cholesky(B_x - B_xy * P_y * B_xy' + UniformScaling(eps(T))).U)
-    LN.B.data = - A * B_xy * P_y
-    LN.c.data = - A * μ_x + LN.B.data * μ_y
+    B = - A * B_xy * P_y
+    c = - A * μ_x - B * μ_y
+    LN.B.data = B
+    LN.c.data = c
     LN.A_free.data = A
     LN.A_free.data[diagind(A)] .= log.(A[diagind(A)])
     return nothing
@@ -93,7 +95,7 @@ function ConditionalLinearLayer_forward_logdet(X::AbstractArray{T, Nx}, Y::Abstr
     N = size(X, Nx)
     X_vecs = reshape(X, :, N)
     Y_vecs = reshape(Y, :, N)
-    A = tril(A_free, -1) + Diagonal(exp.(A_free[diagind(A_free)]) .+ eps(T))
+    A = tril(A_free, -1) + Diagonal(exp.(A_free[diagind(A_free)]))
     Z = A * X_vecs .+ B * Y_vecs .+ c
     return Z, tr(A_free)
 end

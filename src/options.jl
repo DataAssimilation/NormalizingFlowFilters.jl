@@ -61,6 +61,12 @@ end
     reset_optimizer = false
     reset_weights = false
     print_every = 1
+    early_stopping = EarlyStoppingOptions()
+end
+
+@option struct EarlyStoppingOptions
+    active = false
+    look_backs = ((20, 0.5, 0.1),)
 end
 
 @option struct OptimizerOptions
