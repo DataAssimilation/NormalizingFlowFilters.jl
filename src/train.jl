@@ -111,7 +111,7 @@ function train_network!(filter::NormalizingFlowFilter, Xs, Ys; log_data=nothing)
         append!(batch_idxs, n_train+1)
     end
 
-    best_params = get_params(filter.network_device)
+    best_params = deepcopy(get_params(filter.network_device))
     best_loss = nothing
 
     @withprogress name="Epochs" for e in 1:(cfg.n_epochs) # epoch loop
@@ -185,7 +185,7 @@ function train_network!(filter::NormalizingFlowFilter, Xs, Ys; log_data=nothing)
         if cfg.save_best
             if isnothing(best_loss) || loss_epochs[end] < best_loss
                 best_loss = loss_epochs[end]
-                best_params = get_params(filter.network_device)
+                best_params = deepcopy(get_params(filter.network_device))
             end
         end
 
