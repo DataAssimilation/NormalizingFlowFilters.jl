@@ -3,7 +3,7 @@ export ConditionalLinearLayer
 using InvertibleNetworks: InvertibleNetworks, NeuralNetLayer, Parameter, glorot_uniform
 using Statistics: cov
 import Flux
-using LinearAlgebra: pinv, cholesky, tr, tril, diagind, Diagonal, UniformScaling
+using LinearAlgebra: pinv, cholesky, tr, tril, diag, diagind, Diagonal, UniformScaling
 
 
 """
@@ -62,7 +62,13 @@ function initialize!(LN::ConditionalLinearLayer, X::AbstractArray{T, Nx}, Y::Abs
     B_xy = cov(X_vecs, Y_vecs; dims=2)
     B_y = cov(Y_vecs; dims=2)
     P_y = pinv(B_y)
-    A = pinv(cholesky(B_x - B_xy * P_y * B_xy' + UniformScaling(eps(T))).U)
+    S = B_x - B_xy * P_y * B_xy'
+    A = try
+        A = pinv(cholesky(B_x - B_xy * P_y * B_xy' + UniformScaling(eps(T))).U)
+    catch e
+        @show diag(S)
+        throw(e)
+    end
     B = - A * B_xy * P_y
     c = - A * μ_x - B * μ_y
     LN.B.data = B
