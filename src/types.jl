@@ -33,6 +33,8 @@ function get_activation(config::ActivationOptions)
         return GaLUlayer()
     elseif config.type == "exp_clamp"
         return ActivationFunction(x -> ExpClamp(x), y -> ExpClampInv(y), (Δy, y) -> ExpClampGrad(Δy, y))
+    elseif config.type == "softplus"
+        return SoftplusLayer()
     elseif config.type == "identity"
         return IdentityActivation()
     else

@@ -7,7 +7,7 @@ using NormalizingFlowFilters.InvertibleNetworks: get_params, set_params!, get_gr
 
 include("grad_test.jl")
 
-@testset "conditional_linear_glow gradient $activation" for activation in ("exp_clamp", "sigmoid")
+@testset "conditional_linear_glow gradient $activation" for activation in ("exp_clamp", "sigmoid", "softplus")
     N = 12
     Nx = 1
     network_config = ConditionalLinearGlowOptions(
@@ -101,7 +101,7 @@ include("grad_test.jl")
     grad_test(forward_input(params1), Xinit, ΔX, dJ_dX; ΔJ=nothing, maxiter=6, h0=1e0, stol=1e-1, hfactor=8e-1, unittest=:test)
 end
 
-@testset "conditional_linear_glow assimilate: $activation, random:$random_init" for activation in ("exp_clamp", "sigmoid"), random_init in (false, true)
+@testset "conditional_linear_glow assimilate: $activation, random:$random_init" for activation in ("exp_clamp", "sigmoid", "softplus"), random_init in (false, true)
     N = 1000
     Nx = 1
 

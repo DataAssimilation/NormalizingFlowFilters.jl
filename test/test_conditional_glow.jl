@@ -3,7 +3,7 @@ using LinearAlgebra: norm, Diagonal, svd
 using Random
 
 
-@testset "conditional_glow gradient $activation" for activation in ("exp_clamp", "sigmoid")
+@testset "conditional_glow gradient $activation" for activation in ("exp_clamp", "sigmoid", "softplus")
     N = 12
     Nx = 1
     network_config = ConditionalGlowOptions(
