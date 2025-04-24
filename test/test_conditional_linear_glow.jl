@@ -7,7 +7,7 @@ using NormalizingFlowFilters.InvertibleNetworks: get_params, set_params!, get_gr
 
 include("grad_test.jl")
 
-@testset "conditional_linear_glow gradient $activation" for activation in ("exp_clamp", "sigmoid", "softplus")
+@testset "conditional_linear_glow gradient $activation post_actnorm: $post_actnorm" for activation in ("exp_clamp", "sigmoid", "softplus"), post_actnorm in (false, true)
     N = 12
     Nx = 1
     network_config = ConditionalLinearGlowOptions(
@@ -20,7 +20,8 @@ include("grad_test.jl")
             n_hidden = 1,
             residual = ResidualBlockOptions(k1 = 1, p1=0),
             positive_activation = ActivationOptions(type=activation),
-        )
+        ),
+        post_actnorm=post_actnorm,
     )
     Random.seed!(8297)
     network = NetworkConditionalLinearGlow(2, network_config)
@@ -93,12 +94,12 @@ include("grad_test.jl")
 
     # Test gradient with respect to params.
     J, Zx, dJ_dX, dJ_dparams = forward(Xinit, params1; with_grad=true)
-    grad_test(forward_params(Xinit), params1, Δparams, dJ_dparams; ΔJ=nothing, maxiter=6, h0=1e0, stol=1e-1, hfactor=8e-1, unittest=:test)
+    grad_test(forward_params(Xinit), params1, Δparams, dJ_dparams; ΔJ=nothing, maxiter=12, h0=2e0, stol=1e-1, hfactor=8e-1, unittest=:test)
 
     # Test gradient with respect to X.
     J, Zx, dJ_dX, dJ_dparams = forward(Xinit, params1; with_grad=true)
     ΔX = randn(Nx,N)
-    grad_test(forward_input(params1), Xinit, ΔX, dJ_dX; ΔJ=nothing, maxiter=6, h0=1e0, stol=1e-1, hfactor=8e-1, unittest=:test)
+    grad_test(forward_input(params1), Xinit, ΔX, dJ_dX; ΔJ=nothing, maxiter=12, h0=1e0, stol=1e-1, hfactor=8e-1, unittest=:test)
 end
 
 @testset "conditional_linear_glow assimilate: $activation, random:$random_init" for activation in ("exp_clamp", "sigmoid", "softplus"), random_init in (false, true)
@@ -149,6 +150,7 @@ end
         reset_weights=true,
         reset_optimizer=true,
         print_every = 150,
+        early_stopping=EarlyStoppingOptions(active=true),
     )
     estimator = NormalizingFlowFilter(network, optimizer; device, training_config)
 

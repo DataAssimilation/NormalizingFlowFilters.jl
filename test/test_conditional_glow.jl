@@ -1,6 +1,8 @@
 using Statistics: mean, cov, std
 using LinearAlgebra: norm, Diagonal, svd
 using Random
+using NormalizingFlowFilters
+using NormalizingFlowFilters.InvertibleNetworks: get_params, set_params!, get_grads
 
 
 @testset "conditional_glow gradient $activation" for activation in ("exp_clamp", "sigmoid", "softplus")
@@ -150,6 +152,7 @@ end
         reset_weights=true,
         reset_optimizer=true,
         print_every = 200,
+        early_stopping=EarlyStoppingOptions(active=true),
     )
     estimator = NormalizingFlowFilter(network, optimizer; device, training_config)
 

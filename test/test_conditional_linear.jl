@@ -127,6 +127,7 @@ end
         validation_perc=1.0,
         reset_weights=true,
         reset_optimizer=true,
+        early_stopping=EarlyStoppingOptions(active=true),
     )
     estimator = NormalizingFlowFilter(network, optimizer; device, training_config)
 

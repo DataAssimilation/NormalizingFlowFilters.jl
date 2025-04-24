@@ -20,6 +20,7 @@ using Statistics: mean, var
         reset_weights=true,
         reset_optimizer=true,
         print_every=0,
+        early_stopping=EarlyStoppingOptions(active=true),
     )
 
     filter = NormalizingFlowFilter(network, optimizer; device, training_config)
@@ -71,6 +72,7 @@ end
         noise_lev_x=1e-3,
         batch_size=11,
         validation_perc=0.63,
+        early_stopping=EarlyStoppingOptions(active=true),
     )
 
     filter = NormalizingFlowFilter(network, optimizer; device, training_config)

@@ -1,7 +1,8 @@
 using Configurations: @option
 
 export ConditionalGlowOptions, ConditionalSVDOptions, ConditionalLinearOptions, TrainingOptions,
-        OptimizerOptions, ActivationOptions, ResidualBlockOptions, ConditionalLinearGlowOptions
+        OptimizerOptions, ActivationOptions, ResidualBlockOptions, ConditionalLinearGlowOptions,
+        EarlyStoppingOptions
 
 @option struct ConditionalGlowOptions
     chan_x = 3
@@ -48,6 +49,7 @@ end
 @option struct ConditionalLinearGlowOptions
     ln_config = ConditionalLinearOptions()
     gn_config = ConditionalGlowOptions()
+    post_actnorm = false
 end
 
 @option struct TrainingOptions
@@ -67,7 +69,7 @@ end
 
 @option struct EarlyStoppingOptions
     active = false
-    look_backs = ((20, 0.5, 0.1),)
+    look_backs = ((20, 0.5, 0.1),(100, 0.5, -1f-6))
 end
 
 @option struct OptimizerOptions
