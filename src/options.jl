@@ -64,7 +64,9 @@ end
     reset_weights = false
     print_every = 1
     save_best = true
-    early_stopping = EarlyStoppingOptions()
+    early_stopping_training_loss = EarlyStoppingOptions()
+    early_stopping_validation_loss = EarlyStoppingOptions()
+    cm_metrics = false
 end
 
 @option struct EarlyStoppingOptions

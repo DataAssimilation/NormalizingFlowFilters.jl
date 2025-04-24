@@ -124,10 +124,11 @@ end
         noise_lev_y=1e-3,
         noise_lev_x=1e-3,
         batch_size=N,
-        validation_perc=1.0,
+        validation_perc=0.8,
         reset_weights=true,
         reset_optimizer=true,
-        early_stopping=EarlyStoppingOptions(active=true),
+        early_stopping_training_loss=EarlyStoppingOptions(active=true),
+        early_stopping_validation_loss=EarlyStoppingOptions(active=true),
     )
     estimator = NormalizingFlowFilter(network, optimizer; device, training_config)
 
@@ -197,7 +198,7 @@ end
         noise_lev_y=0e-3,
         noise_lev_x=0e-3,
         batch_size=N,
-        validation_perc=1.0,
+        validation_perc=0.8,
         reset_weights=true,
         reset_optimizer=true,
         print_every = 20

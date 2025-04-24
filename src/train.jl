@@ -34,19 +34,25 @@ function get_loss(G, X_batch, Y_batch; device=gpu, batch_size, N, noise_lev_x, n
     end
     l2_total = 0
     logdet_total = 0
-    num_batches = div(num_test, batch_size)
+    num_batches = cld(num_test, batch_size)
+    batch_idxs = collect(1:batch_size:(num_test + 1))
+    if batch_idxs[end] != num_test+1
+        push!(batch_idxs, num_test+1)
+    end
     for i in 1:num_batches
-        x_i = X_batch[:, :, :, ((i - 1) * batch_size + 1):(i * batch_size)]
-        y_i = Y_batch[:, :, :, ((i - 1) * batch_size + 1):(i * batch_size)]
+        idx = batch_idxs[i]:(batch_idxs[i + 1] - 1)
+        n_batch = length(idx)
+        x_i = X_batch[:, :, :, idx]
+        y_i = Y_batch[:, :, :, idx]
 
         x_i .+= noise_lev_x * randn(Float32, size(x_i))
         y_i .+= noise_lev_y * randn(Float32, size(y_i))
 
         Zx, Zy, lgdet = cpu(G.forward(device(x_i), device(y_i)))
-        l2_total += norm(Zx)^2 / (prod(N) * batch_size)
-        logdet_total += lgdet / prod(N)
+        l2_total += 0.5 * norm(Zx)^2 / prod(N)
+        logdet_total += n_batch * lgdet / prod(N)
     end
-    return l2_total / (num_batches), logdet_total / (num_batches)
+    return l2_total / num_test, logdet_total / num_test
 end
 
 function train_network!(filter::NormalizingFlowFilter, Xs, Ys; log_data=nothing)
@@ -76,7 +82,8 @@ function train_network!(filter::NormalizingFlowFilter, Xs, Ys; log_data=nothing)
     ssim_test = Vector{Float64}()
     l2_cm_test = Vector{Float64}()
 
-    loss_epochs = Vector{Float64}()
+    loss_total_train_epochs = Vector{Float64}()
+    loss_total_valid_epochs = Vector{Float64}()
 
     # Use MLutils to split into training and validation set
     num_samples = size(Xs)[end]
@@ -108,7 +115,7 @@ function train_network!(filter::NormalizingFlowFilter, Xs, Ys; log_data=nothing)
 
     batch_idxs = collect(1:cfg.batch_size:(n_train + 1))
     if batch_idxs[end] != n_train+1
-        append!(batch_idxs, n_train+1)
+        push!(batch_idxs, n_train+1)
     end
 
     best_params = deepcopy(get_params(filter.network_device))
@@ -140,8 +147,8 @@ function train_network!(filter::NormalizingFlowFilter, Xs, Ys; log_data=nothing)
                 Zx, Zy, lgdet = filter.network_device.forward(device(X), device(Y))
 
                 # Loss function is l2 norm
-                append!(loss, 0.5 * norm(Zx)^2 / (prod(N) * n_batch))  # normalize by image size and batch size
-                append!(logdet_train, -lgdet / prod(N)) # logdet is internally normalized by batch size
+                push!(loss, 0.5 * norm(Zx)^2 / (prod(N) * n_batch))  # normalize by image size and batch size
+                push!(logdet_train, -lgdet / prod(N)) # logdet is internally normalized by batch size
 
                 # Set gradients of flow and summary network
                 #filter.network_device.backward(Zx / cfg.batch_size, Zx, Zy; Y_save=Y|> device)
@@ -181,10 +188,10 @@ function train_network!(filter::NormalizingFlowFilter, Xs, Ys; log_data=nothing)
                 end
             end
         end
-        push!(loss_epochs, mean(loss[end-n_batches+1:end] .+ logdet_train[end-n_batches+1:end]))
+        push!(loss_total_train_epochs, mean(loss[end-n_batches+1:end] .+ logdet_train[end-n_batches+1:end]))
         if cfg.save_best
-            if isnothing(best_loss) || loss_epochs[end] < best_loss
-                best_loss = loss_epochs[end]
+            if isnothing(best_loss) || loss_total_train_epochs[end] < best_loss
+                best_loss = loss_total_train_epochs[end]
                 best_params = deepcopy(get_params(filter.network_device))
             end
         end
@@ -200,37 +207,40 @@ function train_network!(filter::NormalizingFlowFilter, Xs, Ys; log_data=nothing)
             noise_lev_x=cfg.noise_lev_x,
             noise_lev_y=cfg.noise_lev_y,
         )
-        append!(logdet_test, -lgdet_test_val)
-        append!(loss_test, l2_test_val)
+        push!(logdet_test, -lgdet_test_val)
+        push!(loss_test, l2_test_val)
+        push!(loss_total_valid_epochs, loss_test[end] + logdet_test[end])
 
-        # get conditional mean metrics over training batch
-        cm_l2_train, cm_ssim_train = get_cm_l2_ssim(
-            filter.network_device,
-            Xs,
-            Ys,
-            X_train[:, :, :, 1:(cfg.n_condmean)],
-            Y_train[:, :, :, 1:(cfg.n_condmean)];
-            device,
-            num_samples=cfg.num_post_samples,
-            batch_size=cfg.batch_size,
-        )
-        append!(ssim, cm_ssim_train)
-        append!(l2_cm, cm_l2_train)
-
-        if size(X_test, 4) > 0
-            # get conditional mean metrics over testing batch
-            cm_l2_test, cm_ssim_test = get_cm_l2_ssim(
+        if cfg.cm_metrics
+            # get conditional mean metrics over training batch
+            cm_l2_train, cm_ssim_train = get_cm_l2_ssim(
                 filter.network_device,
                 Xs,
                 Ys,
-                X_test[:, :, :, 1:(cfg.n_condmean)],
-                Y_test[:, :, :, 1:(cfg.n_condmean)];
+                X_train[:, :, :, 1:(cfg.n_condmean)],
+                Y_train[:, :, :, 1:(cfg.n_condmean)];
                 device,
                 num_samples=cfg.num_post_samples,
                 batch_size=cfg.batch_size,
             )
-            append!(ssim_test, cm_ssim_test)
-            append!(l2_cm_test, cm_l2_test)
+            push!(ssim, cm_ssim_train)
+            push!(l2_cm, cm_l2_train)
+
+            if size(X_test, 4) > 0
+                # get conditional mean metrics over testing batch
+                cm_l2_test, cm_ssim_test = get_cm_l2_ssim(
+                    filter.network_device,
+                    Xs,
+                    Ys,
+                    X_test[:, :, :, 1:(cfg.n_condmean)],
+                    Y_test[:, :, :, 1:(cfg.n_condmean)];
+                    device,
+                    num_samples=cfg.num_post_samples,
+                    batch_size=cfg.batch_size,
+                )
+                push!(ssim_test, cm_ssim_test)
+                push!(l2_cm_test, cm_l2_test)
+            end
         end
 
         if cfg.print_every != 0 && e % cfg.print_every == 0
@@ -264,12 +274,12 @@ function train_network!(filter::NormalizingFlowFilter, Xs, Ys; log_data=nothing)
             end
         end
 
-        if cfg.early_stopping.active
+        if cfg.early_stopping_training_loss.active
             early_stop = false
-            for (de, prop, delta) in cfg.early_stopping.look_backs
+            for (de, prop, delta) in cfg.early_stopping_training_loss.look_backs
                 if e > de
                     # Check for loss not improving for some number of epochs.
-                    loss_difference = loss_epochs[end] .- loss_epochs[end-de:end-1]
+                    loss_difference = loss_total_train_epochs[end] .- loss_total_train_epochs[end-de:end-1]
                     if mean(loss_difference .>= delta) > prop
                         early_stop = true
                         break
@@ -278,6 +288,25 @@ function train_network!(filter::NormalizingFlowFilter, Xs, Ys; log_data=nothing)
             end
             if early_stop
                 break
+            end
+        end
+
+        if size(X_test, 4) > 0
+            if cfg.early_stopping_validation_loss.active
+                early_stop = false
+                for (de, prop, delta) in cfg.early_stopping_validation_loss.look_backs
+                    if e > de
+                        # Check for loss not improving for some number of epochs.
+                        loss_difference = loss_total_valid_epochs[end] .- loss_total_valid_epochs[end-de:end-1]
+                        if mean(loss_difference .>= delta) > prop
+                            early_stop = true
+                            break
+                        end
+                    end
+                end
+                if early_stop
+                    break
+                end
             end
         end
     end
