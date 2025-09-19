@@ -2,112 +2,113 @@ using Statistics: mean, cov, std
 using LinearAlgebra: norm, Diagonal, svd
 using Random
 using NormalizingFlowFilters
-using NormalizingFlowFilters.InvertibleNetworks: get_params, set_params!, get_grads, NetworkConditionalCorrelation
+using NormalizingFlowFilters.InvertibleNetworks: get_params, set_params!, get_grads, NetworkConditionalCorrelation, forward, backward
 using Test
 
 include("grad_test.jl")
 
-# @testset "conditional_correlation gradient" begin
-#     N = 12
-#     Nx = 1
-#     network_config = ConditionalCorrelationOptions(
-#         chan_x = Nx,
-#         chan_y = Nx,
-#         L = 1,
-#         K = 7,
-#         subnetwork = CouplingLayerOptions(
-#             subnetwork = ResidualBlockOptions(n_hidden=1, k1 = 1, p1=0)
-#         )
-#     )
-#     in_shape = (1, 1, Nx)
-#     cond_shape = (1, 1, Nx)
-#     network = NetworkConditionalCorrelation(in_shape, cond_shape, network_config)
+@testset "conditional_correlation gradient" begin
+    N = 12
+    Nx = 1
 
-#     forward_full = function (X, Y, params; with_grad=false)
-#         if !isnothing(params)
-#             set_params!(network, params)
-#         end
-#         if ndims(X) < 4
-#             X = reshape(X, ones(Int64, 4 - ndims(X))..., size(X)...)
-#         end
-#         if ndims(Y) < 4
-#             Y = reshape(Y, ones(Int64, 4 - ndims(Y))..., size(Y)...)
-#         end
-#         Zx, Zy, logdet = network.forward(X, Y)
-#         J = sum(0.5 * (Zx .^ 2))/ size(X)[end] - logdet
-#         if with_grad
-#             dJ_dZx = Zx / size(X)[end]
-#             dJ_dX, _, dJ_dY = network.backward(dJ_dZx, Zx, Zy)
-#             dJ_dparams = get_grads(network)
-#             return J, Zx, dJ_dX, dJ_dparams
-#         end
-#         return J
-#     end
-#     forward = (X, params; with_grad=false) -> forward_full(X, Yinit, params; with_grad)
+    Random.seed!(8237)
 
-#     forward_params = function (X)
-#         return function (params; with_grad=false)
-#             return forward(Xinit, params; with_grad)
-#         end
-#     end
+    network_config = ConditionalCorrelationOptions(
+        chan_x = Nx,
+        chan_y = Nx,
+        L = 1,
+        K = 1,
+        subnetwork = CouplingLayerOptions(
+            subnetwork = ResidualBlockOptions(n_hidden=1, k1 = 1, p1=0)
+        )
+    )
+    in_shape = (1, 1, Nx)
+    cond_shape = (1, 1, Nx)
+    network = NetworkConditionalCorrelation(in_shape, cond_shape, network_config)
 
-#     forward_input = function (params)
-#         function (X; with_grad=false)
-#             return forward(X, params; with_grad)
-#         end
-#     end
+    forward_full = function (X, Y, params; with_grad=false)
+        if !isnothing(params)
+            set_params!(network, params)
+        end
+        sizeX0 = size(X)
+        if ndims(X) < 4
+            X = reshape(X, ones(Int64, 4 - ndims(X))..., size(X)...)
+        end
+        if ndims(Y) < 4
+            Y = reshape(Y, ones(Int64, 4 - ndims(Y))..., size(Y)...)
+        end
+        Zx, Zy, logdet = forward(X, Y, network)
+        J = sum(0.5 * (Zx .^ 2))/ size(X)[end] - logdet
+        if with_grad
+            dJ_dZx = Zx / size(X)[end]
+            dJ_dX, _, dJ_dY = backward(dJ_dZx, Zx, Zy, network)
+            dJ_dparams = get_grads(network)
+            dJ_dX = reshape(dJ_dX, sizeX0)
+            return J, Zx, dJ_dX, dJ_dparams
+        end
+        return J
+    end
+    forward_X_params = (X, params; with_grad=false) -> forward_full(X, Yinit, params; with_grad)
 
-#     Random.seed!(8237)
-#     Xinit = randn(Nx,N)
-#     Xinit .-= mean(Xinit; dims=2)
-#     Xinit ./= std(Xinit; dims=2)
+    forward_params = function (X)
+        return function (params; with_grad=false)
+            return forward_X_params(Xinit, params; with_grad)
+        end
+    end
 
-#     noise = randn(Nx,N)
-#     noise .-= mean(noise; dims=2)
-#     noise ./= std(noise; dims=2)
-#     Yinit = Xinit .+ noise
+    forward_input = function (params)
+        function (X; with_grad=false)
+            return forward_X_params(X, params; with_grad)
+        end
+    end
 
-#     # This initializes the weights to the optimum value.
-#     _ = forward_full(Xinit, Yinit, nothing)
+    Xinit = randn(Nx,N)
+    Xinit .-= mean(Xinit; dims=2)
+    Xinit ./= std(Xinit; dims=2)
 
-#     params0 = deepcopy(get_params(network))
-#     Δparams = deepcopy(params0)
-#     for Δparams_i in Δparams
-#         target_norm = norm(Δparams_i) * 1e-1
-#         Δparams_i.data .= randn(size(target_norm))
-#         Δparams_i.data .*= target_norm ./ norm(Δparams_i)
-#     end
+    noise = randn(Nx,N)
+    noise .-= mean(noise; dims=2)
+    noise ./= std(noise; dims=2)
+    Yinit = Xinit .+ noise
 
-#     # Test gradient with respect to params.
-#     J, Zx, dJ_dX, dJ_dparams = forward(Xinit, params0; with_grad=true)
-#     grad_test(forward_params(Xinit), params0, Δparams, dJ_dparams; ΔJ=nothing, maxiter=6, h0=1e-1, stol=1e-1, hfactor=5e-1, unittest=:test)
+    # Initialize weights
+    network0 = NetworkConditionalCorrelation(in_shape, cond_shape, network_config)
 
-#     # Test gradient with respect to X.
-#     J, Zx, dJ_dX, dJ_dparams = forward(Xinit, params0; with_grad=true)
-#     ΔX = 1e-3 .* randn(Nx,N)
-#     grad_test(forward_input(params0), Xinit, ΔX, dJ_dX; ΔJ=nothing, maxiter=6, h0=1e0, stol=1e-1, hfactor=8e-1, unittest=:test)
+    params0 = get_params_as_type(network0, Xinit, Yinit, Float64)
+    params = get_params_as_type(network, Xinit, Yinit, Float64)
+    Δparams = params0 - params
 
-#     # Now use random weights.
-#     params1 = deepcopy(params0)
-#     for p in params1
-#         p.data .= randn(size(p.data))
-#     end
-#     Δparams = deepcopy(params1)
-#     for Δparams_i in Δparams
-#         target_norm = norm(Δparams_i) * 1e-1
-#         Δparams_i.data .= randn(size(target_norm))
-#         Δparams_i.data .*= target_norm ./ norm(Δparams_i)
-#     end
+    println("Testing gradient with respect to params")
+    J, Zx, dJ_dX, dJ_dparams = forward_X_params(Xinit, params; with_grad=true)
+    grad_test(forward_params(Xinit), params, Δparams, dJ_dparams; ΔJ=nothing, maxiter=20, h0=4e0, stol=1e-1, hfactor=5e-1, unittest=:test)
 
-#     # Test gradient with respect to params.
-#     J, Zx, dJ_dX, dJ_dparams = forward(Xinit, params1; with_grad=true)
-#     grad_test(forward_params(Xinit), params1, Δparams, dJ_dparams; ΔJ=nothing, maxiter=6, h0=1e0, stol=1e-1, hfactor=8e-1, unittest=:test)
+    println("Testing gradient with respect to X")
+    J, Zx, dJ_dX, dJ_dparams = forward_X_params(Xinit, params; with_grad=true)
+    ΔX = randn(Nx,N)
+    grad_test(forward_input(params), Xinit, ΔX, dJ_dX; ΔJ=nothing, maxiter=20, h0=4e0, stol=1e-1, hfactor=5e-1, unittest=:test)
 
-#     # Test gradient with respect to X.
-#     J, Zx, dJ_dX, dJ_dparams = forward(Xinit, params1; with_grad=true)
-#     ΔX = 1e-3 .* randn(Nx,N)
-#     grad_test(forward_input(params1), Xinit, ΔX, dJ_dX; ΔJ=nothing, maxiter=6, h0=1e0, stol=1e-1, hfactor=8e-1, unittest=:test)
-# end
+    # Now use random weights.
+    params1 = deepcopy(params0)
+    for p in params1
+        p.data .= randn(size(p.data))
+    end
+    Δparams = deepcopy(params1)
+    for Δparams_i in Δparams
+        target_norm = norm(Δparams_i) * 1e-1
+        Δparams_i.data .= randn(size(target_norm))
+        Δparams_i.data .*= target_norm ./ norm(Δparams_i)
+    end
+
+
+    println("Testing gradient with respect to params")
+    J, Zx, dJ_dX, dJ_dparams = forward_X_params(Xinit, params1; with_grad=true)
+    grad_test(forward_params(Xinit), params1, Δparams, dJ_dparams; ΔJ=nothing, maxiter=20, h0=4e0, stol=1e-1, hfactor=5e-1, unittest=:test)
+
+    println("Testing gradient with respect to X")
+    J, Zx, dJ_dX, dJ_dparams = forward_X_params(Xinit, params1; with_grad=true)
+    ΔX = randn(Nx,N)
+    grad_test(forward_input(params1), Xinit, ΔX, dJ_dX; ΔJ=nothing, maxiter=20, h0=4e0, stol=1e-1, hfactor=5e-1, unittest=:test)
+end
 
 
 @testset "conditional_correlation assimilate" begin

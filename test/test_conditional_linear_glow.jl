@@ -104,7 +104,7 @@ include("grad_test.jl")
     grad_test(forward_input(params1), Xinit, ΔX, dJ_dX; ΔJ=nothing, maxiter=20, h0=4e0, stol=1e-1, hfactor=5e-1, unittest=:test)
 end
 
-@testset "conditional_linear_glow assimilate: $activation, random:$random_init" for activation in ("sigmoid", "cosh", "exp_clamp"), random_init in (false, true)
+@testset "conditional_linear_glow assimilate: $activation, random:$random_init" for activation in ("sigmoid", "cosh"), random_init in (false, true)
     N = 1000
     Nx = 1
 

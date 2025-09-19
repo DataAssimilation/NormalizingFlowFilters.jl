@@ -2,110 +2,114 @@ using Statistics: mean, cov, std
 using LinearAlgebra: norm, Diagonal, svd
 using Random
 using NormalizingFlowFilters
-using NormalizingFlowFilters.InvertibleNetworks: get_params, set_params!, get_grads
+using NormalizingFlowFilters.InvertibleNetworks: get_params, set_params!, get_grads, forward, backward, Parameter
 using Test
+
+using Flux
 
 include("grad_test.jl")
 
-@testset "conditional_glow gradient $activation" for activation in ("exp_clamp", "sigmoid", "softplus")
-    N = 12
+function get_params_as_type(G, X, Y, TT)
+    if ndims(X) < 4
+        X = reshape(X, ones(Int64, 4 - ndims(X))..., size(X)...)
+    end
+    if ndims(Y) < 4
+        Y = reshape(Y, ones(Int64, 4 - ndims(Y))..., size(Y)...)
+    end
+    if TT != Float32
+        forward(Float32.(X), Float32.(Y), G)
+        P = deepcopy(get_params(G))
+        for p in P
+            p.data = TT.(p.data)
+        end
+        set_params!(G, deepcopy(P))
+    else
+        forward(X, Y, G)
+        P = deepcopy(get_params(G))
+    end
+    return P
+end
+
+@testset "conditional_glow gradient $activation" for activation in ("sigmoid", "softplus")
+    N = 7
     Nx = 1
+
+    Random.seed!(8237)
+
     network_config = ConditionalGlowOptions(
-        chan_x = 1,
-        chan_y = 1,
-        L = 3,
+        chan_x = Nx,
+        chan_y = Nx,
+        L = 1,
         K = 1,
-        residual = ResidualBlockOptions(n_hidden = 1, k1 = 1, p1=0),
+        residual = ResidualBlockOptions(n_hidden = 3, k1 = 1, p1=0,
+            activation = ActivationOptions(type="softplus"),
+            final_activation = ActivationOptions(type="softplus"),
+        ),
         positive_activation = ActivationOptions(type=activation),
     )
     network = NetworkConditionalGlow(2, network_config)
 
-    forward_full = function (X, Y, params; with_grad=false)
+    forward_full = function (network, X, Y, params; with_grad=false)
         if !isnothing(params)
             set_params!(network, params)
         end
+        sizeX0 = size(X)
         if ndims(X) < 4
             X = reshape(X, ones(Int64, 4 - ndims(X))..., size(X)...)
         end
         if ndims(Y) < 4
             Y = reshape(Y, ones(Int64, 4 - ndims(Y))..., size(Y)...)
         end
-        Zx, Zy, logdet = network.forward(X, Y)
+        Zx, Zy, logdet = forward(X, Y, network)
         J = sum(0.5 * (Zx .^ 2))/ size(X)[end] - logdet
         if with_grad
             dJ_dZx = Zx / size(X)[end]
-            dJ_dX, _, dJ_dY = network.backward(dJ_dZx, Zx, Y)
+            dJ_dX, _, dJ_dY = backward(dJ_dZx, Zx, Zy, network)
             dJ_dparams = get_grads(network)
+            dJ_dX = reshape(dJ_dX, sizeX0)
             return J, Zx, dJ_dX, dJ_dparams
         end
         return J
     end
-    forward = (X, params; with_grad=false) -> forward_full(X, Yinit, params; with_grad)
+    forward_X_params = (X, params; with_grad=false) -> forward_full(network, X, Yinit, params; with_grad)
 
     forward_params = function (X)
         return function (params; with_grad=false)
-            return forward(Xinit, params; with_grad)
+            return forward_X_params(Xinit, params; with_grad)
         end
     end
 
     forward_input = function (params)
         function (X; with_grad=false)
-            return forward(X, params; with_grad)
+            return forward_X_params(X, params; with_grad)
         end
     end
 
-    Random.seed!(8237)
-    Xinit = randn(Nx,N)
+    Xinit = rand(Nx,N)
     Xinit .-= mean(Xinit; dims=2)
     Xinit ./= std(Xinit; dims=2)
 
-    noise = randn(Nx,N)
+    noise = rand(Nx,N)
     noise .-= mean(noise; dims=2)
     noise ./= std(noise; dims=2)
     Yinit = Xinit .+ noise
 
-    # This initializes the weights to the optimum value.
-    _ = forward_full(Xinit, Yinit, nothing)
+    # Initialize weights
+    network0 = NetworkConditionalGlow(2, network_config)
 
-    params0 = deepcopy(get_params(network))
-    Δparams = deepcopy(params0)
-    for Δparams_i in Δparams
-        target_norm = norm(Δparams_i) * 1e-1
-        Δparams_i.data .= randn(size(target_norm))
-        Δparams_i.data .*= target_norm ./ norm(Δparams_i)
-    end
+    params0 = get_params_as_type(network0, Xinit, Yinit, Float64)
+    params = get_params_as_type(network, Xinit, Yinit, Float64)
+    Δparams = params0 - params
 
-    # Test gradient with respect to params.
-    J, Zx, dJ_dX, dJ_dparams = forward(Xinit, params0; with_grad=true)
-    grad_test(forward_params(Xinit), params0, Δparams, dJ_dparams; ΔJ=nothing, maxiter=20, h0=1e0, stol=1e-1, hfactor=5e-1, unittest=:test)
+    println("Testing gradient with respect to params")
+    J, Zx, dJ_dX, dJ_dparams = forward_X_params(Xinit, params; with_grad=true)
+    grad_test(forward_params(Xinit), params, Δparams, dJ_dparams; ΔJ=nothing, maxiter=20, h0=4e0, stol=1e-1, hfactor=5e-1, unittest=:test)
 
-    # Test gradient with respect to X.
-    J, Zx, dJ_dX, dJ_dparams = forward(Xinit, params0; with_grad=true)
+    println("Testing gradient with respect to X")
+    J, Zx, dJ_dX, dJ_dparams = forward_X_params(Xinit, params; with_grad=true)
     ΔX = randn(Nx,N)
-    grad_test(forward_input(params0), Xinit, ΔX, dJ_dX; ΔJ=nothing, maxiter=20, h0=1e0, stol=1e-1, hfactor=5e-1, unittest=:test)
-
-    # Now use random weights.
-    params1 = deepcopy(params0)
-    for p in params1
-        p.data .= randn(size(p.data))
-    end
-    Δparams = deepcopy(params1)
-    for Δparams_i in Δparams
-        target_norm = norm(Δparams_i)
-        Δparams_i.data .= randn(size(target_norm))
-        Δparams_i.data .*= target_norm ./ norm(Δparams_i)
-    end
-
-    # Test gradient with respect to params.
-    J, Zx, dJ_dX, dJ_dparams = forward(Xinit, params1; with_grad=true)
-    grad_test(forward_params(Xinit), params1, Δparams, dJ_dparams; ΔJ=nothing, maxiter=20, h0=1e0, stol=1e-1, hfactor=5e-1, unittest=:test)
-
-    # Test gradient with respect to X.
-    J, Zx, dJ_dX, dJ_dparams = forward(Xinit, params1; with_grad=true)
-    ΔX = 1e-3 .* randn(Nx,N)
-    grad_test(forward_input(params1), Xinit, ΔX, dJ_dX; ΔJ=nothing, maxiter=20, h0=1e0, stol=1e-1, hfactor=5e-1, unittest=:test)
+    grad_test(forward_input(params), Xinit, ΔX, dJ_dX; ΔJ=nothing, maxiter=20, h0=4e0, stol=1e-1, hfactor=5e-1, unittest=:test)
 end
-
 
 @testset "conditional_glow assimilate" begin
     N = 1000

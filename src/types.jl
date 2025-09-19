@@ -1,7 +1,7 @@
 using InvertibleNetworks: InvertibleNetworks,
     ActivationFunction, ExpClamp, ExpClampInv, ExpClampGrad,
     NetworkConditionalGlow, NetworkConditionalCorrelation,
-    ResidualBlock, Conv1x1, ActNorm,
+    ResidualBlock, Conv1x1, ActNorm, IdentityActivation,
     ReLUlayer, SigmoidLayer, LeakyReLUlayer, GaLUlayer,
     SoftplusLayer, TanhLayer, SinhLayer, CoshLayer
 using Flux: Flux, ClipNorm, cpu, gpu
