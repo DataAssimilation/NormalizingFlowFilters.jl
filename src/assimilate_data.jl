@@ -28,7 +28,7 @@ function draw_posterior_samples(
     Y_train_latent_repeat = device(repeat(y_r, 1, 1, 1, batch_size))
     Zx_fixed_train, Zy_fixed_train, _ = G.forward(X_forward, Y_train_latent_repeat)
 
-    X_post = zeros(Float32, size_x[1:(end - 1)]..., num_samples)
+    X_post = zeros(eltype(X), size_x[1:(end - 1)]..., num_samples)
     for i in 1:cld(num_samples, batch_size)
         bi_begin = (i - 1) * batch_size + 1
         bi_end = min((i * batch_size), num_samples)

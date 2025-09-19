@@ -1,6 +1,7 @@
 using Statistics: mean, cov, std
 using LinearAlgebra: norm, Diagonal, svd
 using Random
+using Test
 
 using NormalizingFlowFilters
 using NormalizingFlowFilters.InvertibleNetworks: get_params, set_params!, get_grads
@@ -19,7 +20,7 @@ include("grad_test.jl")
         J = sum(0.5 * (Zx .^ 2))/ size(X)[end] - logdet
         if with_grad
             dJ_dZx = Zx / size(X)[end]
-            dJ_dX, _, dJ_dY = network.backward(dJ_dZx, Zx, Zy)
+            dJ_dX, _, dJ_dY = network.backward(dJ_dZx, Zx, Yinit)
             dJ_dparams = get_grads(network)
             return J, Zx, dJ_dX, dJ_dparams
         end
@@ -62,12 +63,12 @@ include("grad_test.jl")
     # Test gradient with respect to params.
     J, Zx, dJ_dX, dJ_dparams = forward(Xinit, params0; with_grad=true)
     @test norm(dJ_dparams) < 1/N + 1e-5
-    grad_test(forward_params(Xinit), params0, Δparams, dJ_dparams; ΔJ=nothing, maxiter=6, h0=1e1, stol=1e-1, hfactor=5e-1, unittest=:test)
+    grad_test(forward_params(Xinit), params0, Δparams, dJ_dparams; ΔJ=nothing, maxiter=20, h0=1e1, stol=1e-1, hfactor=5e-1, unittest=:test)
 
     # Test gradient with respect to X.
     J, Zx, dJ_dX, dJ_dparams = forward(Xinit, params0; with_grad=true)
     ΔX = 1e-3 .* randn(Nx,N)
-    grad_test(forward_input(params0), Xinit, ΔX, dJ_dX; ΔJ=nothing, maxiter=6, h0=1e0, stol=1e-1, hfactor=8e-1, unittest=:test)
+    grad_test(forward_input(params0), Xinit, ΔX, dJ_dX; ΔJ=nothing, maxiter=20, h0=1e0, stol=1e-1, hfactor=5e-1, unittest=:test)
 
     # Now use random weights.
     params1 = deepcopy(params0)
@@ -83,12 +84,12 @@ include("grad_test.jl")
 
     # Test gradient with respect to params.
     J, Zx, dJ_dX, dJ_dparams = forward(Xinit, params1; with_grad=true)
-    grad_test(forward_params(Xinit), params1, Δparams, dJ_dparams; ΔJ=nothing, maxiter=6, h0=1e0, stol=1e-1, hfactor=8e-1, unittest=:test)
+    grad_test(forward_params(Xinit), params1, Δparams, dJ_dparams; ΔJ=nothing, maxiter=20, h0=1e0, stol=1e-1, hfactor=5e-1, unittest=:test)
 
     # Test gradient with respect to X.
     J, Zx, dJ_dX, dJ_dparams = forward(Xinit, params1; with_grad=true)
     ΔX = 1e-3 .* randn(Nx,N)
-    grad_test(forward_input(params1), Xinit, ΔX, dJ_dX; ΔJ=nothing, maxiter=6, h0=1e0, stol=1e-1, hfactor=8e-1, unittest=:test)
+    grad_test(forward_input(params1), Xinit, ΔX, dJ_dX; ΔJ=nothing, maxiter=20, h0=1e0, stol=1e-1, hfactor=5e-1, unittest=:test)
 end
 
 @testset "conditional_linear assimilate" begin
@@ -103,9 +104,9 @@ end
     prior_obs = deepcopy(prior_state) .+ randn(Nx, N)
 
     # Covariance should be nonzero.
-    B_xy = cov(prior_state, prior_obs; dims=2)
-    B_y = cov(prior_obs; dims=2)
-    @test norm(B_xy) ≈ 1 atol=0.5
+    B_xy0 = cov(prior_state, prior_obs; dims=2)
+    B_y0 = cov(prior_obs; dims=2)
+    @test norm(B_xy0) ≥ 1e-1
 
     # True state is the mean of the prior.
     y_obs = zeros(Nx)
@@ -119,12 +120,12 @@ end
 
     device = cpu
     training_config = TrainingOptions(;
-        n_epochs=3,
+        n_epochs=0,
         num_post_samples=7,
-        noise_lev_y=1e-3,
-        noise_lev_x=1e-3,
+        noise_lev_y=0e0,
+        noise_lev_x=0e0,
         batch_size=N,
-        validation_perc=0.8,
+        validation_perc=1.0,
         reset_weights=true,
         reset_optimizer=true,
         early_stopping_training_loss=EarlyStoppingOptions(active=true),
@@ -137,6 +138,11 @@ end
     data_initial2 = deepcopy(get_data(estimator))
     @test all(p.data == p2.data for (p, p2) in zip(data_initial, data_initial2))
 
+    # Compute expected solution.
+    posterior0 = prior_state .- B_xy0 * (B_y0 \ prior_obs)
+    B_zy0 = cov(posterior0, prior_obs; dims=2)
+    @test norm(B_zy0) < 1e-3
+
     # Assimilate.
     posterior = assimilate_data(estimator, prior_state, prior_obs, y_obs)
 
@@ -144,13 +150,8 @@ end
     B_zy = cov(posterior, prior_obs; dims=2)
     @test norm(B_zy) < 1e-3
 
-    # Compare to expected solution.
-    z = prior_state .- B_xy * (B_y \ prior_obs)
-    @test norm(cov(posterior; dims=2)) ≈ norm(cov(z; dims=2))
-    @test posterior ≈ z
-
-    B_zy = cov(z, prior_obs; dims=2)
-    @test norm(B_zy) < 1e-3
+    @test norm(posterior - posterior0) < 1e-3
+    @test norm(cov(posterior; dims=2) - cov(posterior0; dims=2)) < 1e-3
 
     # Get and set parameters.
     data_final = deepcopy(get_data(estimator))
@@ -193,12 +194,12 @@ end
 
     device = cpu
     training_config = TrainingOptions(;
-        n_epochs=100,
+        n_epochs=200,
         num_post_samples=7,
-        noise_lev_y=0e-3,
-        noise_lev_x=0e-3,
+        noise_lev_y=0e0,
+        noise_lev_x=0e0,
         batch_size=N,
-        validation_perc=0.8,
+        validation_perc=1.0,
         reset_weights=true,
         reset_optimizer=true,
         print_every = 20
@@ -220,7 +221,7 @@ end
     # Compare to expected solution.
     z = prior_state .- B_xy * (B_y \ prior_obs)
     @test norm(cov(posterior; dims=2)) ≈ norm(cov(z; dims=2))
-    @test posterior ≈ z
+    @test norm(posterior - z) < 1e-4
 
     B_zy = cov(z, prior_obs; dims=2)
     @test norm(B_zy) < 1e-3

@@ -3,7 +3,9 @@ using LinearAlgebra: norm, Diagonal, svd
 using Random
 using NormalizingFlowFilters
 using NormalizingFlowFilters.InvertibleNetworks: get_params, set_params!, get_grads
+using Test
 
+include("grad_test.jl")
 
 @testset "conditional_glow gradient $activation" for activation in ("exp_clamp", "sigmoid", "softplus")
     N = 12
@@ -13,8 +15,7 @@ using NormalizingFlowFilters.InvertibleNetworks: get_params, set_params!, get_gr
         chan_y = 1,
         L = 3,
         K = 1,
-        n_hidden = 1,
-        residual = ResidualBlockOptions(k1 = 1, p1=0),
+        residual = ResidualBlockOptions(n_hidden = 1, k1 = 1, p1=0),
         positive_activation = ActivationOptions(type=activation),
     )
     network = NetworkConditionalGlow(2, network_config)
@@ -33,7 +34,7 @@ using NormalizingFlowFilters.InvertibleNetworks: get_params, set_params!, get_gr
         J = sum(0.5 * (Zx .^ 2))/ size(X)[end] - logdet
         if with_grad
             dJ_dZx = Zx / size(X)[end]
-            dJ_dX, _, dJ_dY = network.backward(dJ_dZx, Zx, Zy)
+            dJ_dX, _, dJ_dY = network.backward(dJ_dZx, Zx, Y)
             dJ_dparams = get_grads(network)
             return J, Zx, dJ_dX, dJ_dparams
         end
@@ -76,12 +77,12 @@ using NormalizingFlowFilters.InvertibleNetworks: get_params, set_params!, get_gr
 
     # Test gradient with respect to params.
     J, Zx, dJ_dX, dJ_dparams = forward(Xinit, params0; with_grad=true)
-    grad_test(forward_params(Xinit), params0, Δparams, dJ_dparams; ΔJ=nothing, maxiter=6, h0=1e-1, stol=1e-1, hfactor=5e-1, unittest=:test)
+    grad_test(forward_params(Xinit), params0, Δparams, dJ_dparams; ΔJ=nothing, maxiter=20, h0=1e0, stol=1e-1, hfactor=5e-1, unittest=:test)
 
     # Test gradient with respect to X.
     J, Zx, dJ_dX, dJ_dparams = forward(Xinit, params0; with_grad=true)
-    ΔX = 1e-3 .* randn(Nx,N)
-    grad_test(forward_input(params0), Xinit, ΔX, dJ_dX; ΔJ=nothing, maxiter=6, h0=1e0, stol=1e-1, hfactor=8e-1, unittest=:test)
+    ΔX = randn(Nx,N)
+    grad_test(forward_input(params0), Xinit, ΔX, dJ_dX; ΔJ=nothing, maxiter=20, h0=1e0, stol=1e-1, hfactor=5e-1, unittest=:test)
 
     # Now use random weights.
     params1 = deepcopy(params0)
@@ -90,19 +91,19 @@ using NormalizingFlowFilters.InvertibleNetworks: get_params, set_params!, get_gr
     end
     Δparams = deepcopy(params1)
     for Δparams_i in Δparams
-        target_norm = norm(Δparams_i) * 1e-1
+        target_norm = norm(Δparams_i)
         Δparams_i.data .= randn(size(target_norm))
         Δparams_i.data .*= target_norm ./ norm(Δparams_i)
     end
 
     # Test gradient with respect to params.
     J, Zx, dJ_dX, dJ_dparams = forward(Xinit, params1; with_grad=true)
-    grad_test(forward_params(Xinit), params1, Δparams, dJ_dparams; ΔJ=nothing, maxiter=6, h0=1e0, stol=1e-1, hfactor=8e-1, unittest=:test)
+    grad_test(forward_params(Xinit), params1, Δparams, dJ_dparams; ΔJ=nothing, maxiter=20, h0=1e0, stol=1e-1, hfactor=5e-1, unittest=:test)
 
     # Test gradient with respect to X.
     J, Zx, dJ_dX, dJ_dparams = forward(Xinit, params1; with_grad=true)
     ΔX = 1e-3 .* randn(Nx,N)
-    grad_test(forward_input(params1), Xinit, ΔX, dJ_dX; ΔJ=nothing, maxiter=6, h0=1e0, stol=1e-1, hfactor=8e-1, unittest=:test)
+    grad_test(forward_input(params1), Xinit, ΔX, dJ_dX; ΔJ=nothing, maxiter=20, h0=1e0, stol=1e-1, hfactor=5e-1, unittest=:test)
 end
 
 
@@ -131,24 +132,26 @@ end
         chan_y = 1,
         L = 3,
         K = 1,
-        n_hidden = 1,
-        residual = ResidualBlockOptions(k1 = 1, p1=0),
+        residual = ResidualBlockOptions(n_hidden = 1, k1 = 1, p1=0,
+            activation = ActivationOptions(type="softplus"),
+            final_activation = ActivationOptions(type="softplus"),
+        ),
         positive_activation = ActivationOptions(type="sigmoid"),
     )
 
     network = NetworkConditionalGlow(2, network_config)
 
-    optimizer_config = OptimizerOptions(; lr=1e-3, method="adam")
+    optimizer_config = OptimizerOptions(; lr=2e-3, method="adam")
     optimizer = create_optimizer(optimizer_config)
 
     device = cpu
     training_config = TrainingOptions(;
-        n_epochs=1000,
+        n_epochs=1500,
         num_post_samples=2,
         noise_lev_y=0e-3,
         noise_lev_x=0e-3,
         batch_size=N,
-        validation_perc=0.8,
+        validation_perc=1.0,
         reset_weights=true,
         reset_optimizer=true,
         print_every = 200,

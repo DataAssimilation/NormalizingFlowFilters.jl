@@ -126,7 +126,8 @@ function train_network!(filter::NormalizingFlowFilter, Xs, Ys; log_data=nothing)
 
         _epoch_logid = @progressid
 
-        @withprogress name="Batches" for b in 1:n_batches # batch loop
+        # @withprogress name="Batches" for b in 1:n_batches # batch loop
+        for b in 1:n_batches # batch loop
             _batch_logid = @progressid
             begin
                 idx = train_idxs[batch_idxs[b]:(batch_idxs[b + 1] - 1)]

@@ -52,6 +52,28 @@ function initialize!(LN::ConditionalSVDLayer, X::AbstractArray{T, Nx}, Y::Abstra
     return nothing
 end
 
+"""
+
+Given SVD of the covariances of X and Y, computes a bias such
+that Z1 = X + bias has no correlation with Y. This breaks
+correlations with Y but introduces internal correlations in Z.
+So it must be followed with a step to break those correlations.
+
+    Z1 = X - Bxy * inv(By) * Y
+
+    Bx = cov(x) = ΔX * ΔX'
+    By = cov(y) = ΔY * ΔY'
+    Bxy = cov(x, y) = ΔX * ΔY'
+
+    ΔX = Ux * Sx * Vx'
+    ΔY = Uy * Sy * Vy'
+
+    Z2 = ((Bx - Bxy * inv(By) * Bxy') ^ (-0.5)) * Z1
+
+Let rho = -Bxy * inv(By).
+
+    Z2 = ((Bx - rho * Bxy') ^ (-0.5)) * Z1
+"""
 function compute_bias(LN::ConditionalSVDLayer, Y::AbstractArray{T, Ny}) where {T, Ny}
     Ux = LN.Ux.data
     Vtx = LN.Vtx.data
@@ -68,11 +90,11 @@ function compute_bias(LN::ConditionalSVDLayer, Y::AbstractArray{T, Ny}) where {T
         a ./= Sy
     else
         a .= Sy .* (
-            Uy' * (
-                Uy * (
+            # Uy' * (
+            #     Uy * (
                     a ./ (Sy .^ 2)
-                )
-            )
+                # )
+            # )
         )
     end
     return Ux * (

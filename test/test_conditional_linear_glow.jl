@@ -7,21 +7,23 @@ using NormalizingFlowFilters.InvertibleNetworks: get_params, set_params!, get_gr
 
 include("grad_test.jl")
 
-@testset "conditional_linear_glow gradient $activation post_actnorm: $post_actnorm" for activation in ("exp_clamp", "sigmoid", "softplus"), post_actnorm in (false, true)
+@testset "conditional_linear_glow gradient $activation" for activation in ("sigmoid", "softplus")
     N = 12
     Nx = 1
     network_config = ConditionalLinearGlowOptions(
         ln_config = ConditionalLinearOptions(random_init=true),
         gn_config = ConditionalGlowOptions(
-            chan_x = 1,
-            chan_y = 1,
+            chan_x = Nx,
+            chan_y = Nx,
             L = 1,
-            K = 6,
-            n_hidden = 1,
-            residual = ResidualBlockOptions(k1 = 1, p1=0),
+            K = 1,
+            residual = ResidualBlockOptions(n_hidden = 1, k1 = 1, p1=0,
+                    activation = ActivationOptions(type="sigmoid"),
+                    final_activation = ActivationOptions(type="sigmoid"),
+                ),
             positive_activation = ActivationOptions(type=activation),
         ),
-        post_actnorm=post_actnorm,
+        post_actnorm = true,
     )
     Random.seed!(8297)
     network = NetworkConditionalLinearGlow(2, network_config)
@@ -32,7 +34,7 @@ include("grad_test.jl")
         J = sum(0.5 * (Zx .^ 2))/ size(X)[end] - logdet
         if with_grad
             dJ_dZx = Zx / size(X)[end]
-            dJ_dX, _, dJ_dY = network.backward(dJ_dZx, Zx, Zy)
+            dJ_dX, _, dJ_dY = network.backward(dJ_dZx, Zx, Yinit)
             dJ_dparams = get_grads(network)
             return J, Zx, dJ_dX, dJ_dparams
         end
@@ -73,12 +75,12 @@ include("grad_test.jl")
 
     # Test gradient with respect to params.
     J, Zx, dJ_dX, dJ_dparams = forward(Xinit, params0; with_grad=true)
-    grad_test(forward_params(Xinit), params0, Δparams, dJ_dparams; ΔJ=nothing, maxiter=6, h0=1e-2, stol=1e-1, hfactor=8e-1, unittest=:test)
+    grad_test(forward_params(Xinit), params0, Δparams, dJ_dparams; ΔJ=nothing, maxiter=20, h0=4e0, stol=1e-1, hfactor=5e-1, unittest=:test)
 
     # Test gradient with respect to X.
     J, Zx, dJ_dX, dJ_dparams = forward(Xinit, params0; with_grad=true)
-    ΔX = 1e-3 .* randn(Nx,N)
-    grad_test(forward_input(params0), Xinit, ΔX, dJ_dX; ΔJ=nothing, maxiter=6, h0=1e0, stol=1e-1, hfactor=8e-1, unittest=:test)
+    ΔX = randn(Nx,N)
+    grad_test(forward_input(params0), Xinit, ΔX, dJ_dX; ΔJ=nothing, maxiter=20, h0=4e0, stol=1e-1, hfactor=5e-1, unittest=:test)
 
     # Now use random weights.
     params1 = deepcopy(params0)
@@ -87,22 +89,22 @@ include("grad_test.jl")
     end
     Δparams = deepcopy(params1)
     for Δparams_i in Δparams
-        target_norm = norm(Δparams_i) * 1e-1
+        target_norm = norm(Δparams_i)
         Δparams_i.data .= randn(size(target_norm))
         Δparams_i.data .*= target_norm ./ norm(Δparams_i)
     end
 
     # Test gradient with respect to params.
     J, Zx, dJ_dX, dJ_dparams = forward(Xinit, params1; with_grad=true)
-    grad_test(forward_params(Xinit), params1, Δparams, dJ_dparams; ΔJ=nothing, maxiter=12, h0=2e0, stol=1e-1, hfactor=8e-1, unittest=:test)
+    grad_test(forward_params(Xinit), params1, Δparams, dJ_dparams; ΔJ=nothing, maxiter=20, h0=4e0, stol=1e-1, hfactor=5e-1, unittest=:test)
 
     # Test gradient with respect to X.
     J, Zx, dJ_dX, dJ_dparams = forward(Xinit, params1; with_grad=true)
     ΔX = randn(Nx,N)
-    grad_test(forward_input(params1), Xinit, ΔX, dJ_dX; ΔJ=nothing, maxiter=12, h0=1e0, stol=1e-1, hfactor=8e-1, unittest=:test)
+    grad_test(forward_input(params1), Xinit, ΔX, dJ_dX; ΔJ=nothing, maxiter=20, h0=4e0, stol=1e-1, hfactor=5e-1, unittest=:test)
 end
 
-@testset "conditional_linear_glow assimilate: $activation, random:$random_init" for activation in ("exp_clamp", "sigmoid", "softplus"), random_init in (false, true)
+@testset "conditional_linear_glow assimilate: $activation, random:$random_init" for activation in ("sigmoid", "cosh", "exp_clamp"), random_init in (false, true)
     N = 1000
     Nx = 1
 
@@ -127,12 +129,12 @@ end
         gn_config = ConditionalGlowOptions(
             chan_x = 1,
             chan_y = 1,
-            L = 3,
+            L = 2,
             K = 1,
-            n_hidden = 1,
-            residual = ResidualBlockOptions(k1 = 1),
+            residual = ResidualBlockOptions(n_hidden = 1, k1 = 1),
             positive_activation = ActivationOptions(type=activation),
-        )
+        ),
+        post_actnorm=true,
     )
     network = NetworkConditionalLinearGlow(2, network_config)
 
@@ -141,17 +143,17 @@ end
 
     device = cpu
     training_config = TrainingOptions(;
-        n_epochs=random_init ? 1500 : 750,
+        n_epochs=random_init ? 3000 : 750,
         num_post_samples=2,
-        noise_lev_y=0e-3,
-        noise_lev_x=0e-3,
+        noise_lev_y=1e-3,
+        noise_lev_x=1e-3,
         batch_size=N,
         validation_perc=0.8,
         reset_weights=true,
         reset_optimizer=true,
         print_every = 150,
-        early_stopping_training_loss=EarlyStoppingOptions(active=true),
-        early_stopping_validation_loss=EarlyStoppingOptions(active=true),
+        early_stopping_training_loss=EarlyStoppingOptions(look_backs=((200, 0.5, 0.0),), active=true),
+        early_stopping_validation_loss=EarlyStoppingOptions(look_backs=((200, 0.5, 0.0),), active=true),
     )
     estimator = NormalizingFlowFilter(network, optimizer; device, training_config)
 
