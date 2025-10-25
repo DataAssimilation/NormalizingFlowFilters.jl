@@ -2,7 +2,7 @@ using Statistics: mean, cov, std
 using LinearAlgebra: norm, Diagonal, svd
 using Random
 using NormalizingFlowFilters
-using NormalizingFlowFilters.InvertibleNetworks: get_params, set_params!, get_grads, NetworkConditionalCorrelation, forward, backward
+using NormalizingFlowFilters.InvertibleNetworks: get_params, set_params!, get_grads, NetworkConditionalCouplingStack, forward, backward
 using Test
 
 include("grad_test.jl")
@@ -13,18 +13,19 @@ include("grad_test.jl")
 
     Random.seed!(8237)
 
-    network_config = ConditionalCorrelationOptions(
+    network_config = ConditionalCouplingStackOptions(
         chan_x = Nx,
         chan_y = Nx,
         L = 1,
         K = 1,
         subnetwork = CouplingLayerOptions(
-            subnetwork = ResidualBlockOptions(n_hidden=1, k1 = 1, p1=0)
+            subnetwork = ResidualBlockOptions(n_hidden=1, k1 = 1, p1=0),
+            shift_cond_scalar=true,
         )
     )
     in_shape = (1, 1, Nx)
     cond_shape = (1, 1, Nx)
-    network = NetworkConditionalCorrelation(in_shape, cond_shape, network_config)
+    network = NetworkConditionalCouplingStack(in_shape, cond_shape, network_config)
 
     forward_full = function (X, Y, params; with_grad=false)
         if !isnothing(params)
@@ -72,7 +73,7 @@ include("grad_test.jl")
     Yinit = Xinit .+ noise
 
     # Initialize weights
-    network0 = NetworkConditionalCorrelation(in_shape, cond_shape, network_config)
+    network0 = NetworkConditionalCouplingStack(in_shape, cond_shape, network_config)
 
     params0 = get_params_as_type(network0, Xinit, Yinit, Float64)
     params = get_params_as_type(network, Xinit, Yinit, Float64)
@@ -80,6 +81,8 @@ include("grad_test.jl")
 
     println("Testing gradient with respect to params")
     J, Zx, dJ_dX, dJ_dparams = forward_X_params(Xinit, params; with_grad=true)
+
+    @show J dJ_dX params dJ_dparams
     grad_test(forward_params(Xinit), params, Δparams, dJ_dparams; ΔJ=nothing, maxiter=20, h0=4e0, stol=1e-1, hfactor=5e-1, unittest=:test)
 
     println("Testing gradient with respect to X")
@@ -110,7 +113,6 @@ include("grad_test.jl")
     grad_test(forward_input(params1), Xinit, ΔX, dJ_dX; ΔJ=nothing, maxiter=20, h0=4e0, stol=1e-1, hfactor=5e-1, unittest=:test)
 end
 
-
 @testset "conditional_correlation assimilate" begin
     N = 1000
     Nx = 1
@@ -131,7 +133,7 @@ end
     y_obs = zeros(Nx)
 
     # Set up estimator.
-    network_config = ConditionalCorrelationOptions(
+    network_config = ConditionalCouplingStackOptions(
         chan_x = Nx,
         chan_y = Nx,
         L = 1,
@@ -145,7 +147,7 @@ end
 
     in_shape = (1, 1, Nx)
     cond_shape = (1, 1, Nx)
-    network = NetworkConditionalCorrelation(in_shape, cond_shape, network_config)
+    network = NetworkConditionalCouplingStack(in_shape, cond_shape, network_config)
 
     optimizer_config = OptimizerOptions(; lr=2e-3, method="adam")
     optimizer = create_optimizer(optimizer_config)
@@ -156,7 +158,7 @@ end
         num_post_samples=2,
         noise_lev_y=1e-3,
         noise_lev_x=1e-3,
-        batch_size=N,
+        batch=FixedBatchSizeOptions(batch_size=N),
         validation_perc=1.0,
         reset_weights=false,
         reset_optimizer=true,

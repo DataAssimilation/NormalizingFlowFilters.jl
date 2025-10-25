@@ -1,12 +1,15 @@
 using InvertibleNetworks: InvertibleNetworks,
     ActivationFunction, ExpClamp, ExpClampInv, ExpClampGrad,
-    NetworkConditionalGlow, NetworkConditionalCorrelation,
-    ResidualBlock, Conv1x1, ActNorm, IdentityActivation,
+    NetworkConditionalGlow, NetworkConditionalCouplingStack,
+    ResidualBlock, Conv1x1, ActNorm, LayerConstant,
+    RQSpline1Operator, AffineCouplingOperator,
+    IdentityActivation,
     ReLUlayer, SigmoidLayer, LeakyReLUlayer, GaLUlayer,
-    SoftplusLayer, TanhLayer, SinhLayer, CoshLayer
+    SoftplusLayer, TanhLayer, SinhLayer, CoshLayer,
+    DampedSinhLayer, DampedCoshLayer, ScaledTanhLayer
 using Flux: Flux, ClipNorm, cpu, gpu
 
-export NormalizingFlowFilter,
+export NormalizingFlowFilter, NetworkConditionalCouplingStack,
     NetworkConditionalGlow, create_optimizer, reset_optimizer, cpu, gpu, get_data, set_data!, get_activation
 
 struct NormalizingFlowFilter
@@ -51,6 +54,8 @@ function get_activation(config::ActivationOptions)
         return DampedSinhLayer()
     elseif config.type == "damped_cosh"
         return DampedCoshLayer()
+    elseif config.type == "scaled_tanh"
+        return ScaledTanhLayer()
     else
         error("I don't know what this activation is: $(config.type)")
     end
@@ -68,6 +73,13 @@ function get_network_generator(::Nothing; kwargs...)
     return nothing
 end
 
+function get_network_generator(opt::LayerConstantOptions; kwargs...)
+    return function (in_shape, out_shape=in_shape)
+        p = Parameter(zeros(out_shape))
+        return LayerConstant(p)
+    end
+end
+
 function get_network_generator(opt::ResidualBlockOptions; kwargs...)
     activation = get_activation(opt.activation)
     final_activation = get_activation(opt.final_activation)
@@ -80,32 +92,55 @@ function get_network_generator(opt::ResidualBlockOptions; kwargs...)
     end
 end
 
-function get_network_generator(opt::CouplingLayerOptions; kwargs...)
-    return function (in_shape, out_shape)
-        if opt.joint_correlation
-            n_out = out_shape[end]
-        else
-            n_out = 2 * out_shape[end]
-        end
-        out_shape = tuple(out_shape[1:end-1]..., n_out)
-        return get_network_generator(opt.subnetwork)(in_shape, out_shape)
+function get_coupling_operator_generator(opt::AffineCouplingOperatorOptions; kwargs...)
+    scale_activation = get_activation(opt.scale_activation)
+    shift_activation = get_activation(opt.shift_activation)
+    shift_cond_scalar = opt.shift_cond_scalar
+    joint_correlation = opt.joint_correlation
+    return function (inv_shape, sub_shape)
+        return AffineCouplingOperator(;
+            scale_activation,
+            shift_activation,
+            shift_cond_scalar,
+            joint_correlation,
+        )
     end
 end
 
-function InvertibleNetworks.NetworkConditionalCorrelation(in_shape, cond_shape, config::ConditionalCorrelationOptions)
-    subnetwork_generator = get_network_generator(config.subnetwork; logdet=false)
+function get_coupling_operator_generator(opt::RQSpline1OperatorOptions; kwargs...)
+    constrained_params = opt.constrained_params
+    # @show opt
+    affine_gen = get_coupling_operator_generator(opt.affine)
+    return function (inv_shape, sub_shape)
+        affine = affine_gen(inv_shape, sub_shape)
+        return RQSpline1Operator(; constrained_params, affine)
+    end
+end
+
+function get_coupling_operator_generator(opt::ConditionalDecorrelationOperatorOptions; kwargs...)
+    return function (inv_shape, sub_shape)
+        return ConditionalDecorrelationOperator()
+    end
+end
+
+function InvertibleNetworks.NetworkConditionalCouplingStack(in_shape, cond_shape, config::ConditionalCouplingStackOptions)
+    invertible_coupling_operator_generator = get_coupling_operator_generator(config.coupling_network.invertible_network; logdet=true)
+    subnetwork_generator = get_network_generator(config.coupling_network.subnetwork; logdet=false)
+
     cond_network_generator = get_network_generator(config.cond_network; logdet=false)
     state_initial_network_generator = get_network_generator(config.state_initial_network; logdet=true)
     state_middle_network_generator = get_network_generator(config.state_middle_network; logdet=true)
     state_final_network_generator = get_network_generator(config.state_final_network; logdet=true)
     prenetwork_generator = get_network_generator(config.prenetwork; logdet=true)
-    return NetworkConditionalCorrelation(in_shape, cond_shape, config.L, config.K;
+
+    return NetworkConditionalCouplingStack(in_shape, cond_shape, config.L, config.K;
         cond_network_generator,
         state_initial_network_generator,
         state_middle_network_generator,
         state_final_network_generator,
         subnetwork_generator,
         prenetwork_generator,
+        invertible_coupling_operator_generator,
     )
 end
 
@@ -161,6 +196,10 @@ function reset_network(network::NetworkConditionalGlow)
         activation=cl.activation,
         rb_activation=cl.RB.activation
     )
+end
+
+function reset_network(network::NetworkConditionalCouplingStack)
+    error("not implemented")
 end
 
 function create_optimizer(config)

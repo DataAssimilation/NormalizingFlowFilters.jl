@@ -63,8 +63,9 @@ function initialize!(LN::ConditionalLinearLayer, X::AbstractArray{T, Nx}, Y::Abs
     B_y = cov(Y_vecs; dims=2)
     P_y = pinv(B_y)
     S = B_x - B_xy * P_y * B_xy'
+    S = (S .+ S') ./ 2
     A = try
-        A = pinv(cholesky(B_x - B_xy * P_y * B_xy' + UniformScaling(eps(T))).U)
+        A = pinv(cholesky(S + UniformScaling(eps(T))).U)
     catch e
         @show diag(S)
         throw(e)

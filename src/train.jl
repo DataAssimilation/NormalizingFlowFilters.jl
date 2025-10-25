@@ -9,6 +9,16 @@ using ProgressLogging: @withprogress, @logprogress, @progressid
 
 export train_network!, get_cm_l2_ssim, get_loss
 
+function get_batch_size(batch_options::FixedBatchSizeOptions, N)
+    return batch_options.batch_size
+end
+
+function get_batch_size(batch_options::FixedNumBatchesOptions, N)
+    batch_size = Int64(cld(N, batch_options.num_batches))
+    batch_size = max(batch_size, batch_options.min_batch_size)
+    return batch_size
+end
+
 function get_cm_l2_ssim(G, X, Y, X_batch, Y_batch; device=gpu, num_samples, batch_size)
     num_test = size(Y_batch)[end]
     l2_total = 0
@@ -60,7 +70,7 @@ function train_network!(filter::NormalizingFlowFilter, Xs, Ys; log_data=nothing)
     cfg = filter.training_config
 
     if cfg.reset_weights
-        InvertibleNetworks.set_params!(filter.network_device, get_params(reset_network(filter.network_device)))
+        InvertibleNetworks.set_params!(filter.network_device, get_params(reset_network(filter.network_device)) |> device)
     end
 
     if cfg.reset_optimizer
@@ -99,7 +109,7 @@ function train_network!(filter::NormalizingFlowFilter, Xs, Ys; log_data=nothing)
 
     if filter.network isa NetworkConditionalLinear || filter.network isa NetworkConditionalSVD || filter.network isa NetworkConditionalLinearGlow
         initialize!(filter.network.LN, X_train, Y_train)
-        initialize!(filter.network_device.LN, X_train, Y_train)
+        initialize!(filter.network_device.LN, device(X_train), device(Y_train))
     end
 
     X_test = obsview(Xs, test_split)
@@ -110,15 +120,16 @@ function train_network!(filter::NormalizingFlowFilter, Xs, Ys; log_data=nothing)
     # training & test indexes
     n_train = size(X_train)[end]
     n_test = size(X_test)[end]
-    n_batches = cld(n_train, cfg.batch_size)
-    # n_batches_test = cld(n_test, cfg.batch_size)
+    batch_size = get_batch_size(cfg.batch, n_train)
+    n_batches = cld(n_train, batch_size)
 
-    batch_idxs = collect(1:cfg.batch_size:(n_train + 1))
+
+    batch_idxs = collect(1:batch_size:(n_train + 1))
     if batch_idxs[end] != n_train+1
         push!(batch_idxs, n_train+1)
     end
 
-    best_params = deepcopy(get_params(filter.network_device))
+    best_params = deepcopy(get_params(filter.network_device) |> cpu)
     best_loss = nothing
 
     @withprogress name="Epochs" for e in 1:(cfg.n_epochs) # epoch loop
@@ -182,10 +193,10 @@ function train_network!(filter::NormalizingFlowFilter, Xs, Ys; log_data=nothing)
                         loss[end] + logdet_train[end],
                         "\n",
                     )
-                    @logprogress message b/n_batches _id=_batch_logid
-                    if b == n_batches
-                        print(message)
-                    end
+                    # @logprogress message b/n_batches _id=_batch_logid
+                    # if b == n_batches
+                    #     print(message)
+                    # end
                 end
             end
         end
@@ -193,7 +204,7 @@ function train_network!(filter::NormalizingFlowFilter, Xs, Ys; log_data=nothing)
         if cfg.save_best
             if isnothing(best_loss) || loss_total_train_epochs[end] < best_loss
                 best_loss = loss_total_train_epochs[end]
-                best_params = deepcopy(get_params(filter.network_device))
+                best_params = deepcopy(get_params(filter.network_device) |> cpu)
             end
         end
 
@@ -203,7 +214,7 @@ function train_network!(filter::NormalizingFlowFilter, Xs, Ys; log_data=nothing)
             X_test,
             Y_test;
             device,
-            batch_size=cfg.batch_size,
+            batch_size,
             N,
             noise_lev_x=cfg.noise_lev_x,
             noise_lev_y=cfg.noise_lev_y,
@@ -222,7 +233,7 @@ function train_network!(filter::NormalizingFlowFilter, Xs, Ys; log_data=nothing)
                 Y_train[:, :, :, 1:(cfg.n_condmean)];
                 device,
                 num_samples=cfg.num_post_samples,
-                batch_size=cfg.batch_size,
+                batch_size,
             )
             push!(ssim, cm_ssim_train)
             push!(l2_cm, cm_l2_train)
@@ -237,7 +248,7 @@ function train_network!(filter::NormalizingFlowFilter, Xs, Ys; log_data=nothing)
                     Y_test[:, :, :, 1:(cfg.n_condmean)];
                     device,
                     num_samples=cfg.num_post_samples,
-                    batch_size=cfg.batch_size,
+                    batch_size,
                 )
                 push!(ssim_test, cm_ssim_test)
                 push!(l2_cm_test, cm_l2_test)
@@ -316,6 +327,8 @@ function train_network!(filter::NormalizingFlowFilter, Xs, Ys; log_data=nothing)
             :training => Dict{Symbol,Any}(
                 :loss => loss,
                 :logdet => logdet_train,
+                :loss_total => loss_total_train_epochs,
+                :loss_total_batches => loss .+ logdet_train,
                 :ssim_cm => ssim,
                 :l2_cm => l2_cm,
                 :split => train_split,
@@ -323,6 +336,7 @@ function train_network!(filter::NormalizingFlowFilter, Xs, Ys; log_data=nothing)
             :testing => Dict{Symbol,Any}(
                 :loss => loss_test,
                 :logdet => logdet_test,
+                :loss_total => loss_test .+ logdet_test,
                 :ssim_cm => ssim_test,
                 :l2_cm => l2_cm_test,
                 :split => test_split,
@@ -331,7 +345,7 @@ function train_network!(filter::NormalizingFlowFilter, Xs, Ys; log_data=nothing)
     end
 
     if cfg.save_best
-        InvertibleNetworks.set_params!(filter.network_device, best_params)
+        InvertibleNetworks.set_params!(filter.network_device, best_params |> device)
     end
     return nothing
 end

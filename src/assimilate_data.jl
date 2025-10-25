@@ -7,8 +7,9 @@ export assimilate_data, draw_posterior_samples, normalize_samples
 T_LOG = Union{<:AbstractDict,<:Nothing}
 
 function normalize_samples(
-    G, X, Y, size_x; device=gpu, num_samples, batch_size, log_data::T_LOG=nothing
+    G, X, Y, size_x; device=cpu, num_samples, batch_size, log_data::T_LOG=nothing
 )
+    batch_size = min(batch_size, num_samples)
     Zx = zeros(Float32, size_x[1:(end - 1)]..., num_samples)
     for i in 1:div(num_samples, batch_size)
         X_forward_i = X[:, :, :, ((i - 1) * batch_size + 1):(i * batch_size)]
@@ -20,7 +21,7 @@ function normalize_samples(
 end
 
 function draw_posterior_samples(
-    G, y, X, Y, size_x; device=gpu, num_samples, batch_size, log_data::T_LOG=nothing
+    G, y, X, Y, size_x; device=cpu, num_samples, batch_size, log_data::T_LOG=nothing
 )
     batch_size = min(batch_size, num_samples)
     X_forward = device(randn(Float64, size_x[1:(end - 1)]..., batch_size))
@@ -45,8 +46,9 @@ function draw_posterior_samples(
 end
 
 function draw_posterior_samples(
-    G, y, size_x; device=gpu, num_samples, batch_size, log_data::T_LOG=nothing
+    G, y, size_x; device=cpu, num_samples, batch_size, log_data::T_LOG=nothing
 )
+    batch_size = min(batch_size, num_samples)
     X_forward = device(randn(Float64, size_x[1:(end - 1)]..., batch_size))
     y_r = reshape(cpu(y), 1, 1, :, 1)
     Y_train_latent_repeat = device(repeat(y_r, 1, 1, 1, batch_size))
@@ -105,6 +107,7 @@ function assimilate_data(
     train_network!(filter, X, Y; log_data)
 
     y_obs = reshape(y_obs, (1, 1, size(y_obs, 1), size(y_obs, 2)))
+    batch_size = get_batch_size(filter.training_config.batch, size(X, 4))
     X = draw_posterior_samples(
         filter.network_device,
         y_obs,
@@ -113,7 +116,7 @@ function assimilate_data(
         size(X);
         device=filter.device,
         num_samples=size(X, 4),
-        batch_size=filter.training_config.batch_size,
+        batch_size,
         log_data,
     )
     posterior = X[1, 1, :, :]

@@ -2,8 +2,9 @@ using Configurations: @option
 
 export ConditionalGlowOptions, ConditionalSVDOptions, ConditionalLinearOptions, TrainingOptions,
         OptimizerOptions, ActivationOptions, ResidualBlockOptions, ConditionalLinearGlowOptions,
-        EarlyStoppingOptions, ConditionalCorrelationOptions, CouplingLayerOptions, Conv1x1Options,
-        ActNormOptions
+        EarlyStoppingOptions, ConditionalCouplingStackOptions, CouplingLayerOptions, Conv1x1Options,
+        ActNormOptions, LayerConstantOptions, FixedNumBatchesOptions, FixedBatchSizeOptions,
+        RQSpline1OperatorOptions, AffineCouplingOperatorOptions
 
 @option struct ConditionalGlowOptions
     chan_x = 3
@@ -22,7 +23,29 @@ export ConditionalGlowOptions, ConditionalSVDOptions, ConditionalLinearOptions, 
     positive_activation = ActivationOptions(type="sigmoid")
 end
 
-@option struct ConditionalCorrelationOptions
+@option struct CouplingLayerOptions
+    subnetwork = ResidualBlockOptions(
+        final_activation = ActivationOptions("identity")
+    )
+    invertible_network = AffineCouplingOperatorOptions()
+end
+
+@option struct AffineCouplingOperatorOptions
+    scale_activation = ActivationOptions("damped_cosh")
+    shift_activation = ActivationOptions("damped_sinh")
+    shift_cond_scalar = false
+    joint_correlation = true
+end
+
+@option struct ConditionalDecorrelationOperatorOptions
+end
+
+@option struct RQSpline1OperatorOptions
+    constrained_params = true
+    affine = AffineCouplingOperatorOptions()
+end
+
+@option struct ConditionalCouplingStackOptions
     chan_x = 3
     chan_y = 3
 
@@ -34,7 +57,7 @@ end
 
     split_scales = false
 
-    subnetwork = CouplingLayerOptions()
+    coupling_network::CouplingLayerOptions = CouplingLayerOptions()
     cond_network = ActNormOptions()
     state_initial_network = ActNormOptions()
     state_middle_network = ActNormOptions()
@@ -42,17 +65,13 @@ end
     prenetwork = Conv1x1Options()
 end
 
-@option struct CouplingLayerOptions
-    subnetwork = ResidualBlockOptions(
-        final_activation = ActivationOptions("identity")
-    )
-    joint_correlation = true
-end
-
 @option struct Conv1x1Options
 end
 
 @option struct ActNormOptions
+end
+
+@option struct LayerConstantOptions
 end
 
 @option struct ActivationOptions
@@ -90,7 +109,7 @@ end
 
 @option struct TrainingOptions
     n_epochs = 32
-    batch_size = 2
+    batch = FixedNumBatchesOptions()
     noise_lev_x = 0.005f0
     noise_lev_y = 0.0f0
     num_post_samples = 10
@@ -103,6 +122,15 @@ end
     early_stopping_training_loss = EarlyStoppingOptions()
     early_stopping_validation_loss = EarlyStoppingOptions()
     cm_metrics = false
+end
+
+@option struct FixedBatchSizeOptions
+    batch_size = 2
+end
+
+@option struct FixedNumBatchesOptions
+    min_batch_size = 2
+    num_batches = 1
 end
 
 @option struct EarlyStoppingOptions

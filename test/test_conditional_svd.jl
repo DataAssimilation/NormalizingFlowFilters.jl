@@ -17,7 +17,7 @@ using Random
         num_post_samples=7,
         noise_lev_y=1e-3,
         noise_lev_x=1e-3,
-        batch_size=11,
+        batch=FixedBatchSizeOptions(batch_size=11),
         validation_perc=1.0,
         reset_weights=true,
         reset_optimizer=true,

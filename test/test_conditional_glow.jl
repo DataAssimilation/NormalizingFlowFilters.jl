@@ -154,7 +154,7 @@ end
         num_post_samples=2,
         noise_lev_y=0e-3,
         noise_lev_x=0e-3,
-        batch_size=N,
+        batch=FixedBatchSizeOptions(batch_size=N),
         validation_perc=1.0,
         reset_weights=true,
         reset_optimizer=true,
