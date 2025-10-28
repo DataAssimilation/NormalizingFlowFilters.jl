@@ -7,7 +7,7 @@ using Test
 
 include("grad_test.jl")
 
-@testset "conditional_correlation gradient" begin
+@testset "conditional_coupling_stack gradient" begin
     N = 12
     Nx = 1
 
@@ -18,9 +18,9 @@ include("grad_test.jl")
         chan_y = Nx,
         L = 1,
         K = 1,
-        subnetwork = CouplingLayerOptions(
+        coupling_network = CouplingLayerOptions(
             subnetwork = ResidualBlockOptions(n_hidden=1, k1 = 1, p1=0),
-            shift_cond_scalar=true,
+            invertible_network = AffineCouplingOperatorOptions(shift_cond_scalar=true),
         )
     )
     in_shape = (1, 1, Nx)
@@ -113,7 +113,7 @@ include("grad_test.jl")
     grad_test(forward_input(params1), Xinit, ΔX, dJ_dX; ΔJ=nothing, maxiter=20, h0=4e0, stol=1e-1, hfactor=5e-1, unittest=:test)
 end
 
-@testset "conditional_correlation assimilate" begin
+@testset "conditional_coupling_stack assimilate" begin
     N = 1000
     Nx = 1
 
@@ -138,7 +138,7 @@ end
         chan_y = Nx,
         L = 1,
         K = 3,
-        subnetwork = CouplingLayerOptions(
+        coupling_network = CouplingLayerOptions(
             subnetwork = ResidualBlockOptions(n_hidden=1, k1 = 1, p1=0,
                 final_activation = ActivationOptions(type="identity")
             )

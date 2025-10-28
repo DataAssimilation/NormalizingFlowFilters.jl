@@ -76,12 +76,13 @@ function assimilate_data(
     prior_state::T1,
     prior_obs::T2,
     y_obs::Ty,
-    log_data::T_LOG=nothing,
+    log_data::T_LOG=nothing;
+    train=true,
 ) where {T1<:AbstractArray,T2<:AbstractArray,Ty<:Union{<:AbstractArray,<:Number}}
     prior_state = _ensure_2d(prior_state)
     prior_obs = _ensure_2d(prior_obs)
     y_obs = _ensure_1d(y_obs)
-    return assimilate_data(filter, prior_state, prior_obs, y_obs, log_data)
+    return assimilate_data(filter, prior_state, prior_obs, y_obs, log_data; train)
 end
 
 """
@@ -96,7 +97,8 @@ function assimilate_data(
     prior_state::AbstractArray{T1,2},
     prior_obs::AbstractArray{T2,2},
     y_obs::AbstractArray{T3,1},
-    log_data::T_LOG=nothing,
+    log_data::T_LOG=nothing;
+    train=true,
 ) where {T1<:Number,T2<:Number,T3<:Number}
     X = prior_state
     Y = prior_obs
@@ -104,12 +106,14 @@ function assimilate_data(
     X = reshape(X, (1, 1, size(X, 1), size(X, 2)))
     Y = reshape(Y, (1, 1, size(Y, 1), size(Y, 2)))
 
-    train_network!(filter, X, Y; log_data)
+    if train
+        train_network!(filter, X, Y; log_data)
+    end
 
     y_obs = reshape(y_obs, (1, 1, size(y_obs, 1), size(y_obs, 2)))
     batch_size = get_batch_size(filter.training_config.batch, size(X, 4))
     X = draw_posterior_samples(
-        filter.network_device,
+        filter.coupling_network_device,
         y_obs,
         X,
         Y,

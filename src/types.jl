@@ -1,35 +1,38 @@
 using InvertibleNetworks: InvertibleNetworks,
     ActivationFunction, ExpClamp, ExpClampInv, ExpClampGrad,
     NetworkConditionalGlow, NetworkConditionalCouplingStack,
-    ResidualBlock, Conv1x1, ActNorm, LayerConstant,
+    ResidualBlock, ResidualBlockSkip, Conv1x1, ActNorm, LayerConstant,
     RQSpline1Operator, AffineCouplingOperator,
-    IdentityActivation,
+    IdentityActivation, ConditionalDecorrelationOperator,
     ReLUlayer, SigmoidLayer, LeakyReLUlayer, GaLUlayer,
-    SoftplusLayer, TanhLayer, SinhLayer, CoshLayer,
-    DampedSinhLayer, DampedCoshLayer, ScaledTanhLayer
+    SoftplusLayer, TanhLayer, SinhLayer, CoshLayer, LayerStack,
+    DampedSinhLayer, DampedCoshLayer, ScaledTanhLayer, RQSpline1
 using Flux: Flux, ClipNorm, cpu, gpu
 
 export NormalizingFlowFilter, NetworkConditionalCouplingStack,
     NetworkConditionalGlow, create_optimizer, reset_optimizer, cpu, gpu, get_data, set_data!, get_activation
 
 struct NormalizingFlowFilter
-    network
-    network_device
+    coupling_network
+    coupling_network_device
     opt
     device
     training_config
 end
 
 function NormalizingFlowFilter(
-    network, optimizer; device=cpu, training_config=TrainingOptions()
+    coupling_network, optimizer; device=cpu, training_config=TrainingOptions()
 )
     return NormalizingFlowFilter(
-        network, device(network), optimizer, device, training_config
+        coupling_network, device(coupling_network), optimizer, device, training_config
     )
 end
 
+function get_activation(config::RQSpline1ActivationOptions; kwargs...)
+    return RQSpline1(; kwargs...)
+end
 
-function get_activation(config::ActivationOptions)
+function get_activation(config::ActivationOptions; kwargs...)
     if config.type == "relu"
         return ReLUlayer()
     elseif config.type == "sigmoid"
@@ -76,19 +79,49 @@ end
 function get_network_generator(opt::LayerConstantOptions; kwargs...)
     return function (in_shape, out_shape=in_shape)
         p = Parameter(zeros(out_shape))
-        return LayerConstant(p)
+        return LayerConstant(p; kwargs...)
+    end
+end
+
+
+function get_network_generator(opt::LayerStackOptions; kwargs...)
+    gens = [get_network_generator(sub.network; kwargs...) for sub in opt.subnetworks]
+    return function (in_shape, out_shape=in_shape)
+        nchan = out_shape[end]
+        share, rem = divrem(nchan, length(gens))
+        if rem != 0
+            error("Tried to split channels $nchan into $(length(gens)) inputs. I can't do it.")
+        end
+        out_shapes = [(out_shape[1:end-1]..., share) for i in 1:length(gens)]
+        subnetworks = [gen(in_shape, out_shape_i) for (gen, out_shape_i) in zip(gens, out_shapes)]
+        return LayerStack(subnetworks)
     end
 end
 
 function get_network_generator(opt::ResidualBlockOptions; kwargs...)
-    activation = get_activation(opt.activation)
-    final_activation = get_activation(opt.final_activation)
+    activation = get_activation(opt.activation; logdet=false)
+    final_activation = get_activation(opt.final_activation; logdet=false)
     kwargs = (; k1=opt.k1, k2=opt.k2, p1=opt.p1, p2=opt.p2, s1=opt.s1, s2=opt.s2, activation, final_activation, fan=true)
     n_hidden = opt.n_hidden
     return function (in_shape, out_shape)
         ndims = length(in_shape) - 1
         n_out = out_shape[end]
         ResidualBlock(in_shape[end], n_hidden; n_out, ndims, kwargs...)
+    end
+end
+
+function get_network_generator(opt::ResidualBlockSkipOptions; kwargs...)
+    activation = get_activation(opt.activation; logdet=false)
+    final_activation = get_activation(opt.final_activation; logdet=false)
+    kwargs = (;
+        k1=opt.k1, k2=opt.k2,p1=opt.p1, p2=opt.p2, s1=opt.s1, s2=opt.s2,
+        k13=opt.k13, p13=opt.p13, s13=opt.s13, activation, final_activation
+    )
+    n_hidden = opt.n_hidden
+    return function (in_shape, out_shape)
+        ndims = length(in_shape) - 1
+        n_out = out_shape[end]
+        ResidualBlockSkip(in_shape[end], n_hidden; n_out, ndims, kwargs...)
     end
 end
 
@@ -228,14 +261,14 @@ function reset_optimizer(opt)
 end
 
 function get_data(filter::NormalizingFlowFilter)
-    return InvertibleNetworks.get_params(filter.network_device)
+    return InvertibleNetworks.get_params(filter.coupling_network_device)
 end
 
 function set_data!(filter::NormalizingFlowFilter, params)
-    InvertibleNetworks.set_params!(filter.network, params)
-    InvertibleNetworks.set_params!(filter.network_device, params)
+    InvertibleNetworks.set_params!(filter.coupling_network, params)
+    InvertibleNetworks.set_params!(filter.coupling_network_device, params)
 end
 
 function get_network_gradients(filter::NormalizingFlowFilter)
-    return InvertibleNetworks.get_grads(filter.network_device)
+    return InvertibleNetworks.get_grads(filter.coupling_network_device)
 end

@@ -19,7 +19,7 @@ report_testsets = @testset ReportingTestSet "" begin
     include("test_conditional_svd.jl")
     include("test_conditional_glow.jl")
     include("test_conditional_linear_glow.jl")
-    include("test_conditional_correlation.jl")
+    include("test_conditional_coupling_stack.jl")
 
     # Set metadata for doctests.
     DocMeta.setdocmeta!(

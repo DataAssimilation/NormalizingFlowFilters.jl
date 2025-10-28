@@ -4,7 +4,8 @@ export ConditionalGlowOptions, ConditionalSVDOptions, ConditionalLinearOptions, 
         OptimizerOptions, ActivationOptions, ResidualBlockOptions, ConditionalLinearGlowOptions,
         EarlyStoppingOptions, ConditionalCouplingStackOptions, CouplingLayerOptions, Conv1x1Options,
         ActNormOptions, LayerConstantOptions, FixedNumBatchesOptions, FixedBatchSizeOptions,
-        RQSpline1OperatorOptions, AffineCouplingOperatorOptions
+        RQSpline1OperatorOptions, AffineCouplingOperatorOptions, ConditionalDecorrelationOperatorOptions,
+        RQSpline1ActivationOptions, LayerStackOptions, ResidualBlockSkipOptions, RegularizationOptions
 
 @option struct ConditionalGlowOptions
     chan_x = 3
@@ -30,11 +31,27 @@ end
     invertible_network = AffineCouplingOperatorOptions()
 end
 
+@option struct LayerStackOptions
+    subnetworks = (
+        (
+            network = LayerConstantOptions(),
+        ),
+        (
+            network = ResidualBlockOptions(
+                final_activation = ActivationOptions("identity")
+            ),
+        ),
+    )
+end
+
 @option struct AffineCouplingOperatorOptions
     scale_activation = ActivationOptions("damped_cosh")
     shift_activation = ActivationOptions("damped_sinh")
     shift_cond_scalar = false
     joint_correlation = true
+end
+
+@option struct RQSpline1ActivationOptions
 end
 
 @option struct ConditionalDecorrelationOperatorOptions
@@ -94,6 +111,26 @@ end
     s2 = 1 # strides for the second convolution.
 end
 
+@option struct ResidualBlockSkipOptions
+    activation = ActivationOptions(type="sigmoid")
+    final_activation = ActivationOptions(type="identity")
+
+    "Number of hidden channels in convolutional residual blocks"
+    n_hidden = 8
+
+    k1 = 3 # kernel size along each dimension for first and third convolutions.
+    p1 = 1 # padding for first and third convolutions.
+    s1 = 1 # strides for the first and third convolutions.
+
+    k2 = 1 # kernel size along each dimension for second convolution.
+    p2 = 0 # padding for second convolution.
+    s2 = 1 # strides for the second convolution.
+
+    k13 = 1 # kernel size along each dimension for skip convolution (from input to output).
+    p13 = 0 # padding for skip convolution.
+    s13 = 1 # strides for the skip convolution.
+end
+
 @option struct ConditionalSVDOptions
 end
 
@@ -119,9 +156,15 @@ end
     reset_weights = false
     print_every = 1
     save_best = true
+    regularization = RegularizationOptions()
     early_stopping_training_loss = EarlyStoppingOptions()
     early_stopping_validation_loss = EarlyStoppingOptions()
     cm_metrics = false
+end
+
+@option struct RegularizationOptions
+    active = false
+    weight = 1e-3
 end
 
 @option struct FixedBatchSizeOptions
@@ -135,7 +178,14 @@ end
 
 @option struct EarlyStoppingOptions
     active = false
-    look_backs = ((20, 0.5, 0.1),(100, 0.5, -1f-6))
+
+    # Lookback form:
+    #   - (epochs to look back on, proportion to check of last epochs, max allowed increase in loss)
+    #       I.e., after the first 100 epochs have passed, stop if the loss has increased by
+    #       more than the max allowed amount for more than 60% of the past 100 epochs.
+    #   - (epochs to look back on, -1, max allowed increase in loss compared to best loss)
+    #       I.e., when a best loss is achieved, wait 100 epochs, and stop if the loss has increased by more than the max allowed amount.
+    look_backs = ((20, 0.5, 0.1),(100, -1, -1f-6))
 end
 
 @option struct OptimizerOptions

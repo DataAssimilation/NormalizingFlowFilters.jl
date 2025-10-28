@@ -70,7 +70,7 @@ function train_network!(filter::NormalizingFlowFilter, Xs, Ys; log_data=nothing)
     cfg = filter.training_config
 
     if cfg.reset_weights
-        InvertibleNetworks.set_params!(filter.network_device, get_params(reset_network(filter.network_device)) |> device)
+        InvertibleNetworks.set_params!(filter.coupling_network_device, get_params(reset_network(filter.coupling_network_device)) |> device)
     end
 
     if cfg.reset_optimizer
@@ -107,9 +107,9 @@ function train_network!(filter::NormalizingFlowFilter, Xs, Ys; log_data=nothing)
     X_train = obsview(Xs, train_split)
     Y_train = obsview(Ys, train_split)
 
-    if filter.network isa NetworkConditionalLinear || filter.network isa NetworkConditionalSVD || filter.network isa NetworkConditionalLinearGlow
-        initialize!(filter.network.LN, X_train, Y_train)
-        initialize!(filter.network_device.LN, device(X_train), device(Y_train))
+    if filter.coupling_network isa NetworkConditionalLinear || filter.coupling_network isa NetworkConditionalSVD || filter.coupling_network isa NetworkConditionalLinearGlow
+        initialize!(filter.coupling_network.LN, X_train, Y_train)
+        initialize!(filter.coupling_network_device.LN, device(X_train), device(Y_train))
     end
 
     X_test = obsview(Xs, test_split)
@@ -129,7 +129,7 @@ function train_network!(filter::NormalizingFlowFilter, Xs, Ys; log_data=nothing)
         push!(batch_idxs, n_train+1)
     end
 
-    best_params = deepcopy(get_params(filter.network_device) |> cpu)
+    best_params = deepcopy(get_params(filter.coupling_network_device) |> cpu)
     best_loss = nothing
 
     @withprogress name="Epochs" for e in 1:(cfg.n_epochs) # epoch loop
@@ -156,23 +156,57 @@ function train_network!(filter::NormalizingFlowFilter, Xs, Ys; log_data=nothing)
                 end
 
                 # Forward pass of normalizing flow
-                Zx, Zy, lgdet = filter.network_device.forward(device(X), device(Y))
+                Zx, Zy, lgdet = filter.coupling_network_device.forward(device(X), device(Y))
 
                 # Loss function is l2 norm
                 push!(loss, 0.5 * norm(Zx)^2 / (prod(N) * n_batch))  # normalize by image size and batch size
                 push!(logdet_train, -lgdet / prod(N)) # logdet is internally normalized by batch size
 
                 # Set gradients of flow and summary network
-                #filter.network_device.backward(Zx / cfg.batch_size, Zx, Zy; Y_save=Y|> device)
-                filter.network_device.backward(Zx / n_batch, Zx, Zy)
+                #filter.coupling_network_device.backward(Zx / cfg.batch_size, Zx, Zy; Y_save=Y|> device)
+                filter.coupling_network_device.backward(Zx / n_batch, Zx, Zy)
 
-                for p in get_params(filter.network_device)
+                if cfg.regularization.active
+                    if filter.coupling_network isa NetworkConditionalCouplingStack
+                        target_weight = 1e-1
+                        increase = target_weight / cfg.regularization.weight - 1
+                        char_length = cfg.n_epochs / 8
+                        weight = cfg.regularization.weight * (1 + increase * exp(-((e - cfg.n_epochs/2)/char_length)^2))
+                        function regularization_gradient(p)
+                            return (cfg.regularization.weight ./ prod(size(p.data))) .* p.data
+                        end
+                        # function regularization_gradient(p)
+                        #     # g = ifelse.(abs.(p.data) .> 1e-1, sign.(p.data), 0)
+                        #     g = (cfg.regularization.weight ./ prod(size(p.data))) .* sign.(p.data)
+                        #     g = ifelse.(g .* p.grad .>= 0 .&& p.grad .< -g, -p.grad, g)
+                        #     return g
+                        # end
+                        function regularize_param!(p)
+                            if isnothing(p.grad)
+                                p.grad = regularization_gradient(p)
+                            else
+                                p.grad = p.grad .+ regularization_gradient(p)
+                            end
+                        end
+                        for cl in filter.coupling_network_device.CL
+                            for p in get_params(cl.invertible_operator)
+                                regularize_param!(p)
+                            end
+                            for p in get_params(cl.subnetwork)
+                                regularize_param!(p)
+                            end
+                        end
+                    else
+                        error("I don't know how to regularize this: $(typeof(filter.coupling_network))")
+                    end
+                end
+                for p in get_params(filter.coupling_network_device)
                     if isnothing(p.grad)
                         continue
                     end
                     Flux.update!(opt, p.data, p.grad)
                 end
-                clear_grad!(filter.network_device)
+                clear_grad!(filter.coupling_network_device)
 
                 if cfg.print_every != 0 && e % cfg.print_every == 0
                     message = string(
@@ -201,16 +235,10 @@ function train_network!(filter::NormalizingFlowFilter, Xs, Ys; log_data=nothing)
             end
         end
         push!(loss_total_train_epochs, mean(loss[end-n_batches+1:end] .+ logdet_train[end-n_batches+1:end]))
-        if cfg.save_best
-            if isnothing(best_loss) || loss_total_train_epochs[end] < best_loss
-                best_loss = loss_total_train_epochs[end]
-                best_params = deepcopy(get_params(filter.network_device) |> cpu)
-            end
-        end
 
         # get objective mean metrics over testing batch
         l2_test_val, lgdet_test_val = get_loss(
-            filter.network_device,
+            filter.coupling_network_device,
             X_test,
             Y_test;
             device,
@@ -223,10 +251,18 @@ function train_network!(filter::NormalizingFlowFilter, Xs, Ys; log_data=nothing)
         push!(loss_test, l2_test_val)
         push!(loss_total_valid_epochs, loss_test[end] + logdet_test[end])
 
+        if cfg.save_best
+            weighted_loss = loss_total_valid_epochs[end]
+            if isnothing(best_loss) || weighted_loss < best_loss
+                best_loss = weighted_loss
+                best_params = deepcopy(get_params(filter.coupling_network_device) |> cpu)
+            end
+        end
+
         if cfg.cm_metrics
             # get conditional mean metrics over training batch
             cm_l2_train, cm_ssim_train = get_cm_l2_ssim(
-                filter.network_device,
+                filter.coupling_network_device,
                 Xs,
                 Ys,
                 X_train[:, :, :, 1:(cfg.n_condmean)],
@@ -241,7 +277,7 @@ function train_network!(filter::NormalizingFlowFilter, Xs, Ys; log_data=nothing)
             if size(X_test, 4) > 0
                 # get conditional mean metrics over testing batch
                 cm_l2_test, cm_ssim_test = get_cm_l2_ssim(
-                    filter.network_device,
+                    filter.coupling_network_device,
                     Xs,
                     Ys,
                     X_test[:, :, :, 1:(cfg.n_condmean)],
@@ -323,7 +359,7 @@ function train_network!(filter::NormalizingFlowFilter, Xs, Ys; log_data=nothing)
         end
     end
     if !isnothing(log_data)
-        log_data[:network_training] = Dict{Symbol,Any}(
+        log_data[:coupling_network] = Dict{Symbol,Any}(
             :training => Dict{Symbol,Any}(
                 :loss => loss,
                 :logdet => logdet_train,
@@ -345,7 +381,7 @@ function train_network!(filter::NormalizingFlowFilter, Xs, Ys; log_data=nothing)
     end
 
     if cfg.save_best
-        InvertibleNetworks.set_params!(filter.network_device, best_params |> device)
+        InvertibleNetworks.set_params!(filter.coupling_network_device, best_params |> device)
     end
     return nothing
 end
