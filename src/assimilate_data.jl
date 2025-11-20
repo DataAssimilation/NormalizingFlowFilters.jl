@@ -1,6 +1,7 @@
 using Flux: cpu, gpu
 using LinearAlgebra: norm
 using Random: randn
+using Statistics: mean, std
 
 export assimilate_data, draw_posterior_samples, normalize_samples
 
@@ -25,8 +26,7 @@ function draw_posterior_samples(
 )
     batch_size = min(batch_size, num_samples)
     X_forward = device(randn(Float64, size_x[1:(end - 1)]..., batch_size))
-    y_r = reshape(cpu(y), 1, 1, :, 1)
-    Y_train_latent_repeat = device(repeat(y_r, 1, 1, 1, batch_size))
+    Y_train_latent_repeat = device(repeat(y, 1, 1, 1, batch_size))
     Zx_fixed_train, Zy_fixed_train, _ = G.forward(X_forward, Y_train_latent_repeat)
 
     X_post = zeros(eltype(X), size_x[1:(end - 1)]..., num_samples)
@@ -65,11 +65,11 @@ function draw_posterior_samples(
 end
 
 _ensure_1d(a::T) where {T<:Number} = T[a]
-_ensure_1d(a::AbstractArray{T,1}) where {T} = a
+_ensure_1d(a::AbstractArray{T,N}) where {T,N} = a
 
 _ensure_2d(a::T) where {T<:Number} = T[a;;]
 _ensure_2d(a::AbstractArray{T,1}) where {T} = reshape(a, (1, size(a)...))
-_ensure_2d(a::AbstractArray{T,2}) where {T} = a
+_ensure_2d(a::AbstractArray{T,N}) where {T,N} = a
 
 function assimilate_data(
     filter::NormalizingFlowFilter,
@@ -79,10 +79,11 @@ function assimilate_data(
     log_data::T_LOG=nothing;
     train=true,
 ) where {T1<:AbstractArray,T2<:AbstractArray,Ty<:Union{<:AbstractArray,<:Number}}
-    prior_state = _ensure_2d(prior_state)
-    prior_obs = _ensure_2d(prior_obs)
-    y_obs = _ensure_1d(y_obs)
-    return assimilate_data(filter, prior_state, prior_obs, y_obs, log_data; train)
+    X = reshape(prior_state, filter.state_shape..., :)
+    Y = reshape(prior_obs, filter.obs_shape..., :)
+    y_obs = reshape(y_obs, filter.obs_shape...)
+    X_post = assimilate_data(filter, X, Y, y_obs, log_data; train)
+    return reshape(X_post, size(prior_state))
 end
 
 """
@@ -92,25 +93,53 @@ end
 - `y_obs` has shape `r` for observation shape `r`.
 
 """
+# function assimilate_data(
+#     filter::NormalizingFlowFilter,
+#     prior_state::AbstractArray{T1,2},
+#     prior_obs::AbstractArray{T2,2},
+#     y_obs::AbstractArray{T3,1},
+#     log_data::T_LOG=nothing;
+#     train=true,
+# ) where {T1<:Number,T2<:Number,T3<:Number}
+#     X = prior_state
+#     Y = prior_obs
+
+#     X = reshape(X, (1, 1, size(X, 1), size(X, 2)))
+#     Y = reshape(Y, (1, 1, size(Y, 1), size(Y, 2)))
+#     y_obs = reshape(y_obs, (1, 1, size(y_obs, 1), size(y_obs, 2)))
+#     X = assimilate_data(filter, prior_state, prior_obs, y_obs, log_data; train)
+#     posterior = X[1, 1, :, :]
+#     return posterior
+# end
+
 function assimilate_data(
     filter::NormalizingFlowFilter,
-    prior_state::AbstractArray{T1,2},
-    prior_obs::AbstractArray{T2,2},
-    y_obs::AbstractArray{T3,1},
+    prior_state::AbstractArray{T1,4},
+    prior_obs::AbstractArray{T2,4},
+    y_obs::AbstractArray{T3,3},
     log_data::T_LOG=nothing;
     train=true,
 ) where {T1<:Number,T2<:Number,T3<:Number}
     X = prior_state
     Y = prior_obs
 
-    X = reshape(X, (1, 1, size(X, 1), size(X, 2)))
-    Y = reshape(Y, (1, 1, size(Y, 1), size(Y, 2)))
+    if filter.training_config.normalize_initial
+        X_scale = std(X; dims=(1,2,4))
+        X_scale .= ifelse.(X_scale .== 0, 1, X_scale)
+        X_shift = mean(X; dims=(1,2,4))
+        X = (X .- X_shift) ./ X_scale
+
+        Y_scale = std(Y; dims=(1,2,4))
+        Y_scale .= ifelse.(Y_scale .== 0, 1, Y_scale)
+        Y_shift = mean(Y; dims=(1,2,4))
+        Y = (Y .- Y_shift) ./ Y_scale
+        y_obs = (y_obs .- Y_shift) ./ Y_scale
+    end
 
     if train
         train_network!(filter, X, Y; log_data)
     end
 
-    y_obs = reshape(y_obs, (1, 1, size(y_obs, 1), size(y_obs, 2)))
     batch_size = get_batch_size(filter.training_config.batch, size(X, 4))
     X = draw_posterior_samples(
         filter.coupling_network_device,
@@ -123,6 +152,8 @@ function assimilate_data(
         batch_size,
         log_data,
     )
-    posterior = X[1, 1, :, :]
-    return posterior
+    if filter.training_config.normalize_initial
+        X .= X_scale .* X .+ X_shift
+    end
+    return X
 end

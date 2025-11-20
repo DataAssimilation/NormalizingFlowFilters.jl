@@ -5,7 +5,15 @@ export ConditionalGlowOptions, ConditionalSVDOptions, ConditionalLinearOptions, 
         EarlyStoppingOptions, ConditionalCouplingStackOptions, CouplingLayerOptions, Conv1x1Options,
         ActNormOptions, LayerConstantOptions, FixedNumBatchesOptions, FixedBatchSizeOptions,
         RQSpline1OperatorOptions, AffineCouplingOperatorOptions, ConditionalDecorrelationOperatorOptions,
-        RQSpline1ActivationOptions, LayerStackOptions, ResidualBlockSkipOptions, RegularizationOptions
+        RQSpline1ActivationOptions, LayerStackOptions, ResidualBlockSkipOptions,
+        LearningRateDecayOptions, WeightDecayOptions, TargetUnitNormalOptions, TargetUnitNormalPlusUniformOptions,
+        HyperComplexitySearcherOptions, UnitGaussianNoiseOptions, DataCorrelatedGaussianNoiseOptions,
+        CovarianceInflationGaussianNoiseOptions, remake_options
+
+function remake_options(opts::T; kwargs...) where {T}
+    opts_kwargs = (f => getfield(opts, f) for f in fieldnames(T))
+    return T(; opts_kwargs..., kwargs...)
+end
 
 @option struct ConditionalGlowOptions
     chan_x = 3
@@ -29,6 +37,7 @@ end
         final_activation = ActivationOptions("identity")
     )
     invertible_network = AffineCouplingOperatorOptions()
+    split = true
 end
 
 @option struct LayerStackOptions
@@ -49,6 +58,7 @@ end
     shift_activation = ActivationOptions("damped_sinh")
     shift_cond_scalar = false
     joint_correlation = true
+    just_shift = false
 end
 
 @option struct RQSpline1ActivationOptions
@@ -146,9 +156,9 @@ end
 
 @option struct TrainingOptions
     n_epochs = 32
+    normalize_initial = true
     batch = FixedNumBatchesOptions()
-    noise_lev_x = 0.005f0
-    noise_lev_y = 0.0f0
+    noise = UnitGaussianNoiseOptions()
     num_post_samples = 10
     validation_perc = 0.8
     n_condmean = 2
@@ -156,15 +166,40 @@ end
     reset_weights = false
     print_every = 1
     save_best = true
-    regularization = RegularizationOptions()
     early_stopping_training_loss = EarlyStoppingOptions()
     early_stopping_validation_loss = EarlyStoppingOptions()
+    hypersearcher = nothing
     cm_metrics = false
 end
 
-@option struct RegularizationOptions
+@option struct UnitGaussianNoiseOptions
+    x = 0.005f0
+    y = 0.005f0
+end
+
+@option struct DataCorrelatedGaussianNoiseOptions
+    x = 0.001f0
+    y = 0.001f0
+    x_correlated = 0.005f0
+    y_correlated = 0.005f0
+end
+
+@option struct CovarianceInflationGaussianNoiseOptions
+    x = 0.001f0
+    y = 0.001f0
+    inflation = 0.01f0
+end
+
+@option struct WeightDecayOptions
     active = false
-    weight = 1e-3
+    factor = 1e-5
+end
+
+@option struct LearningRateDecayOptions
+    active = false
+    factor = 0.9
+    step = 500
+    minimum = 1e-1
 end
 
 @option struct FixedBatchSizeOptions
@@ -194,4 +229,19 @@ end
     epsilon = 1.0f-8
     method = "adam"
     clipnorm_val = 3.0f0
+    weight_decay = WeightDecayOptions()
+    learning_rate_decay = LearningRateDecayOptions()
+end
+
+@option struct TargetUnitNormalOptions
+end
+
+@option struct TargetUnitNormalPlusUniformOptions
+    uniform_weight = 0.001
+end
+
+@option struct HyperComplexitySearcherOptions
+    min_complexity = 1
+    max_complexity = 32
+    keep_going = 4
 end

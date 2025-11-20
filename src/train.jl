@@ -4,8 +4,9 @@ using MLUtils: splitobs, obsview
 using ImageQualityIndexes: assess_ssim
 using Random: randn, randperm
 using InvertibleNetworks: InvertibleNetworks, reset!, clear_grad!, get_params
-using Statistics: mean
+using Statistics: mean, var
 using ProgressLogging: @withprogress, @logprogress, @progressid
+using SpecialFunctions: logfactorial
 
 export train_network!, get_cm_l2_ssim, get_loss
 
@@ -37,12 +38,13 @@ function get_cm_l2_ssim(G, X, Y, X_batch, Y_batch; device=gpu, num_samples, batc
     return l2_total / num_test, ssim_total / num_test
 end
 
-function get_loss(G, X_batch, Y_batch; device=gpu, batch_size, N, noise_lev_x, noise_lev_y)
+function get_loss(G, X_batch, Y_batch; device=gpu, batch_size, N, target_distribution)
     num_test = size(Y_batch)[end]
     if num_test == 0
-        return NaN, NaN
+        return NaN, NaN, NaN
     end
-    l2_total = 0
+    weighted_misfit_total = 0
+    loss_nlogpz_total = 0
     logdet_total = 0
     num_batches = cld(num_test, batch_size)
     batch_idxs = collect(1:batch_size:(num_test + 1))
@@ -55,45 +57,46 @@ function get_loss(G, X_batch, Y_batch; device=gpu, batch_size, N, noise_lev_x, n
         x_i = X_batch[:, :, :, idx]
         y_i = Y_batch[:, :, :, idx]
 
-        x_i .+= noise_lev_x * randn(Float32, size(x_i))
-        y_i .+= noise_lev_y * randn(Float32, size(y_i))
-
         Zx, Zy, lgdet = cpu(G.forward(device(x_i), device(y_i)))
-        l2_total += 0.5 * norm(Zx)^2 / prod(N)
+        nlogpz, dnlogpz_dz = compute_negative_log_density_with_gradient(target_distribution, Zx, Zy)
+        loss_nlogpz_total += nlogpz
+        weighted_misfit_total += sum(dnlogpz_dz .* Zx) / prod(N)
         logdet_total += n_batch * lgdet / prod(N)
     end
-    return l2_total / num_test, logdet_total / num_test
+
+    return loss_nlogpz_total / num_test, logdet_total / num_test, weighted_misfit_total / num_test
+end
+
+function add_training_noise(cfg::UnitGaussianNoiseOptions, X::AbstractArray{T, Nx}, Y::AbstractArray{T, Ny}) where {T, Nx, Ny}
+    X = X .+ cfg.x * randn(T, size(X))
+    Y = Y .+ cfg.y * randn(T, size(Y))
+    return X, Y
+end
+
+function add_training_noise(cfg::DataCorrelatedGaussianNoiseOptions, X::AbstractArray{T, Nx}, Y::AbstractArray{T, Ny}) where {T, Nx, Ny}
+    Nb = size(X)[end]
+    batch_noise = randn(T, Nb, Nb)
+    x_scale = cfg.x_correlated / sqrt(Nb - 1)
+    y_scale = cfg.y_correlated / sqrt(Nb - 1)
+    X = X .+ reshape(reshape(X .- mean(X; dims=Nx), :, Nb) * (batch_noise .* x_scale), size(X)) .+ cfg.x * randn(T, size(X))
+    Y = Y .+ reshape(reshape(Y .- mean(Y; dims=Ny), :, Nb) * (batch_noise .* y_scale), size(Y)) .+ cfg.y * randn(T, size(Y))
+    return X, Y
+end
+
+function add_training_noise(cfg::CovarianceInflationGaussianNoiseOptions, X::AbstractArray{T, Nx}, Y::AbstractArray{T, Ny}) where {T, Nx, Ny}
+    Nb = size(X)[end]
+    x_scale = cfg.inflation / sqrt(Nb - 1)
+    y_scale = cfg.inflation / sqrt(Nb - 1)
+    X = X .+ (X .- mean(X; dims=Nx)) .* x_scale .+ cfg.x * randn(T, size(X))
+    Y = Y .+ (Y .- mean(Y; dims=Ny)) .* y_scale .+ cfg.y * randn(T, size(Y))
+    return X, Y
 end
 
 function train_network!(filter::NormalizingFlowFilter, Xs, Ys; log_data=nothing)
+    target_distribution = filter.target_distribution
     device = filter.device
     cfg = filter.training_config
-
-    if cfg.reset_weights
-        InvertibleNetworks.set_params!(filter.coupling_network_device, get_params(reset_network(filter.coupling_network_device)) |> device)
-    end
-
-    if cfg.reset_optimizer
-        opt = reset_optimizer(filter.opt)
-    else
-        opt = filter.opt
-    end
-
-    N = size(Xs)[1:(end - 1)]
-
-    # Training logs
-    loss = Vector{Float64}()
-    logdet_train = Vector{Float64}()
-    ssim = Vector{Float64}()
-    l2_cm = Vector{Float64}()
-
-    loss_test = Vector{Float64}()
-    logdet_test = Vector{Float64}()
-    ssim_test = Vector{Float64}()
-    l2_cm_test = Vector{Float64}()
-
-    loss_total_train_epochs = Vector{Float64}()
-    loss_total_valid_epochs = Vector{Float64}()
+    opt = filter.opt
 
     # Use MLutils to split into training and validation set
     num_samples = size(Xs)[end]
@@ -107,7 +110,12 @@ function train_network!(filter::NormalizingFlowFilter, Xs, Ys; log_data=nothing)
     X_train = obsview(Xs, train_split)
     Y_train = obsview(Ys, train_split)
 
+    if cfg.reset_weights
+        InvertibleNetworks.set_params!(filter.coupling_network_device, get_params(filter.coupling_network_generator(filter.coupling_network_device, X_train, Y_train)) |> device)
+    end
+
     if filter.coupling_network isa NetworkConditionalLinear || filter.coupling_network isa NetworkConditionalSVD || filter.coupling_network isa NetworkConditionalLinearGlow
+        Base.depwarn("This `initialize!` call will be taken out in future versions. Please initialize within the `coupling_network_generator`.", :train_network!)
         initialize!(filter.coupling_network.LN, X_train, Y_train)
         initialize!(filter.coupling_network_device.LN, device(X_train), device(Y_train))
     end
@@ -115,22 +123,107 @@ function train_network!(filter::NormalizingFlowFilter, Xs, Ys; log_data=nothing)
     X_test = obsview(Xs, test_split)
     Y_test = obsview(Ys, test_split)
 
-    # train_loader = DataLoader(XY_train, batchsize=cfg.batch_size, shuffle=true, partial=false);
+    if isnothing(cfg.hypersearcher)
+        train_network!(filter.coupling_network_device, target_distribution, cfg, opt, device, X_train, X_test, Y_train, Y_test, log_data)
+        log_data[:coupling_network][:training][:split] = train_split
+        log_data[:coupling_network][:testing][:split] = test_split
+        return
+    end
+    network = train_network!(cfg.hypersearcher, filter.coupling_network_generator, filter.coupling_network_device, target_distribution, cfg, opt, device, X_train, X_test, Y_train, Y_test, log_data)
+    log_data[:coupling_network][:training][:split] = train_split
+    log_data[:coupling_network][:testing][:split] = test_split
+    filter.coupling_network_device = network |> device
+    filter.coupling_network = network |> cpu
+end
 
-    # training & test indexes
+function train_network!(searcher::HyperComplexitySearcherOptions, coupling_network_generator, coupling_network_device, target_distribution, cfg, opt, device, X_train, X_test, Y_train, Y_test, log_data)
+    if isnothing(log_data)
+        my_log_data = Dict{Symbol, Any}()
+    else
+        my_log_data = log_data
+    end
+
+    my_log_data[:complexity_search] = Dict{Symbol, Any}()
+
+    f = function (l, smaller_network)
+        k = Symbol(l)
+        println("Testing complexity == $l")
+        if haskey(my_log_data[:complexity_search], k)
+            println("   Found in cache: $(my_log_data[:complexity_search][k][:best_loss]) for complexity = $l")
+            return my_log_data[:complexity_search][k][:best_loss], my_log_data[:complexity_search][k][:network]
+        end
+        layer_log_data = Dict{Symbol, Any}()
+        my_log_data[:complexity_search][Symbol(l)] = layer_log_data
+        network = coupling_network_generator(smaller_network, X_train, Y_train; complexity=l) |> device
+        train_network!(network, target_distribution, cfg, opt, device, X_train, X_test, Y_train, Y_test, layer_log_data)
+        layer_log_data[:best_loss] = minimum(layer_log_data[:coupling_network][:testing][:loss_total])
+        layer_log_data[:network] = get_params(network)
+        println("  Got $(layer_log_data[:best_loss]) for complexity = $l")
+        return layer_log_data[:best_loss], network
+    end
+
+    o_best, network_best = f(searcher.min_complexity, nothing)
+    network_closest = network_best
+    best_l = searcher.min_complexity
+    for l in (searcher.min_complexity+1):searcher.max_complexity
+        o, network = f(l, network_closest)
+        if o < o_best
+            println("New best is at complexity $l")
+            o_best = o
+            network_best = network
+            best_l = l
+        end
+        if o > o_best && l - best_l >= searcher.keep_going
+            println("quitting here because o > o_best && $l - $best_l > $(searcher.keep_going)")
+            break
+        end
+        network_closest = network
+    end
+    my_log_data[:coupling_network] = my_log_data[:complexity_search][Symbol(best_l)][:coupling_network]
+    return network_best
+end
+
+function train_network!(coupling_network_device, target_distribution, cfg, opt, device, X_train, X_test, Y_train, Y_test, log_data)
+    N = size(X_train)[1:(end - 1)]
+
+    # Training logs
+    loss = Vector{Float64}()
+    loss_weighted_misfit_train = Vector{Float64}()
+    loss_weighted_misfit_valid = Vector{Float64}()
+    logdet_train = Vector{Float64}()
+    ssim = Vector{Float64}()
+    l2_cm = Vector{Float64}()
+
+    loss_test = Vector{Float64}()
+    logdet_test = Vector{Float64}()
+    ssim_test = Vector{Float64}()
+    l2_cm_test = Vector{Float64}()
+
+    loss_total_train_epochs = Vector{Float64}()
+    loss_total_valid_epochs = Vector{Float64}()
+
     n_train = size(X_train)[end]
     n_test = size(X_test)[end]
     batch_size = get_batch_size(cfg.batch, n_train)
     n_batches = cld(n_train, batch_size)
-
 
     batch_idxs = collect(1:batch_size:(n_train + 1))
     if batch_idxs[end] != n_train+1
         push!(batch_idxs, n_train+1)
     end
 
-    best_params = deepcopy(get_params(filter.coupling_network_device) |> cpu)
-    best_loss = nothing
+    if cfg.reset_optimizer
+        opt = create_optimizer(opt.config).flux
+    else
+        opt = opt.flux
+    end
+
+    best_params = deepcopy(get_params(coupling_network_device) |> cpu)
+    best_train_loss = Inf
+    best_valid_loss = Inf
+
+    best_train_epoch = 0
+    best_valid_epoch = 0
 
     @withprogress name="Epochs" for e in 1:(cfg.n_epochs) # epoch loop
         train_idxs = randperm(n_train)
@@ -145,8 +238,7 @@ function train_network!(filter::NormalizingFlowFilter, Xs, Ys; log_data=nothing)
                 n_batch = length(idx)
                 X = X_train[:, :, :, idx]
                 Y = Y_train[:, :, :, idx]
-                X .+= cfg.noise_lev_x * randn(Float32, size(X))
-                Y .+= cfg.noise_lev_y * randn(Float32, size(Y))
+                X, Y = add_training_noise(cfg.noise, X, Y)
 
                 for i in 1:n_batch
                     if rand() > 0.5
@@ -156,57 +248,25 @@ function train_network!(filter::NormalizingFlowFilter, Xs, Ys; log_data=nothing)
                 end
 
                 # Forward pass of normalizing flow
-                Zx, Zy, lgdet = filter.coupling_network_device.forward(device(X), device(Y))
+                Zx, Zy, lgdet = coupling_network_device.forward(device(X), device(Y))
 
-                # Loss function is l2 norm
-                push!(loss, 0.5 * norm(Zx)^2 / (prod(N) * n_batch))  # normalize by image size and batch size
+                # Loss function comes from target_distribution.
+                nlogpz, dnlogpz_dz = compute_negative_log_density_with_gradient(target_distribution, Zx, Zy)
+                push!(loss, nlogpz / n_batch)
+                push!(loss_weighted_misfit_train, sum(dnlogpz_dz .* Zx) / prod(N) / n_batch)
                 push!(logdet_train, -lgdet / prod(N)) # logdet is internally normalized by batch size
 
                 # Set gradients of flow and summary network
-                #filter.coupling_network_device.backward(Zx / cfg.batch_size, Zx, Zy; Y_save=Y|> device)
-                filter.coupling_network_device.backward(Zx / n_batch, Zx, Zy)
+                ΔZx = dnlogpz_dz
+                coupling_network_device.backward(ΔZx / n_batch, Zx, Zy)
 
-                if cfg.regularization.active
-                    if filter.coupling_network isa NetworkConditionalCouplingStack
-                        target_weight = 1e-1
-                        increase = target_weight / cfg.regularization.weight - 1
-                        char_length = cfg.n_epochs / 8
-                        weight = cfg.regularization.weight * (1 + increase * exp(-((e - cfg.n_epochs/2)/char_length)^2))
-                        function regularization_gradient(p)
-                            return (cfg.regularization.weight ./ prod(size(p.data))) .* p.data
-                        end
-                        # function regularization_gradient(p)
-                        #     # g = ifelse.(abs.(p.data) .> 1e-1, sign.(p.data), 0)
-                        #     g = (cfg.regularization.weight ./ prod(size(p.data))) .* sign.(p.data)
-                        #     g = ifelse.(g .* p.grad .>= 0 .&& p.grad .< -g, -p.grad, g)
-                        #     return g
-                        # end
-                        function regularize_param!(p)
-                            if isnothing(p.grad)
-                                p.grad = regularization_gradient(p)
-                            else
-                                p.grad = p.grad .+ regularization_gradient(p)
-                            end
-                        end
-                        for cl in filter.coupling_network_device.CL
-                            for p in get_params(cl.invertible_operator)
-                                regularize_param!(p)
-                            end
-                            for p in get_params(cl.subnetwork)
-                                regularize_param!(p)
-                            end
-                        end
-                    else
-                        error("I don't know how to regularize this: $(typeof(filter.coupling_network))")
-                    end
-                end
-                for p in get_params(filter.coupling_network_device)
+                for p in get_params(coupling_network_device)
                     if isnothing(p.grad)
                         continue
                     end
                     Flux.update!(opt, p.data, p.grad)
                 end
-                clear_grad!(filter.coupling_network_device)
+                clear_grad!(coupling_network_device)
 
                 if cfg.print_every != 0 && e % cfg.print_every == 0
                     message = string(
@@ -219,8 +279,10 @@ function train_network!(filter::NormalizingFlowFilter, Xs, Ys; log_data=nothing)
                         b,
                         "/",
                         n_batches,
-                        "\n    f l2 =  ",
+                        "\n    negative log p(z) =  ",
                         loss[end],
+                        "\n    weighted l2 =  ",
+                        loss_weighted_misfit_train[end],
                         "\n    lgdet = ",
                         logdet_train[end],
                         "\n    f =     ",
@@ -237,32 +299,37 @@ function train_network!(filter::NormalizingFlowFilter, Xs, Ys; log_data=nothing)
         push!(loss_total_train_epochs, mean(loss[end-n_batches+1:end] .+ logdet_train[end-n_batches+1:end]))
 
         # get objective mean metrics over testing batch
-        l2_test_val, lgdet_test_val = get_loss(
-            filter.coupling_network_device,
+        nlogpz_valid, lgdet_test_val, weighted_misfit_valid = get_loss(
+            coupling_network_device,
             X_test,
             Y_test;
             device,
             batch_size,
             N,
-            noise_lev_x=cfg.noise_lev_x,
-            noise_lev_y=cfg.noise_lev_y,
+            target_distribution,
         )
         push!(logdet_test, -lgdet_test_val)
-        push!(loss_test, l2_test_val)
+        push!(loss_test, nlogpz_valid)
         push!(loss_total_valid_epochs, loss_test[end] + logdet_test[end])
+        push!(loss_weighted_misfit_valid, weighted_misfit_valid)
 
         if cfg.save_best
-            weighted_loss = loss_total_valid_epochs[end]
-            if isnothing(best_loss) || weighted_loss < best_loss
-                best_loss = weighted_loss
-                best_params = deepcopy(get_params(filter.coupling_network_device) |> cpu)
+            if isnothing(best_train_loss) || loss_total_train_epochs[end] < best_train_loss
+                best_train_loss = loss_total_train_epochs[end]
+                best_train_epoch = e
+                best_params = deepcopy(get_params(coupling_network_device) |> cpu)
+            end
+            if isnothing(best_valid_loss) || loss_total_valid_epochs[end] < best_valid_loss
+                best_valid_loss = loss_total_valid_epochs[end]
+                best_valid_epoch = e
+                best_params = deepcopy(get_params(coupling_network_device) |> cpu)
             end
         end
 
         if cfg.cm_metrics
             # get conditional mean metrics over training batch
             cm_l2_train, cm_ssim_train = get_cm_l2_ssim(
-                filter.coupling_network_device,
+                coupling_network_device,
                 Xs,
                 Ys,
                 X_train[:, :, :, 1:(cfg.n_condmean)],
@@ -277,7 +344,7 @@ function train_network!(filter::NormalizingFlowFilter, Xs, Ys; log_data=nothing)
             if size(X_test, 4) > 0
                 # get conditional mean metrics over testing batch
                 cm_l2_test, cm_ssim_test = get_cm_l2_ssim(
-                    filter.coupling_network_device,
+                    coupling_network_device,
                     Xs,
                     Ys,
                     X_test[:, :, :, 1:(cfg.n_condmean)],
@@ -299,8 +366,10 @@ function train_network!(filter::NormalizingFlowFilter, Xs, Ys; log_data=nothing)
                 "/",
                 cfg.n_epochs,
                 "\nTraining batch average:",
-                "\n    f l2 =  ",
+                "\n    negative log p(z) =  ",
                 mean(loss[(end - n_batches + 1):end]),
+                "\n    weighted l2 =  ",
+                mean(loss_weighted_misfit_train[(end - n_batches + 1):end]),
                 "\n    lgdet = ",
                 mean(logdet_train[(end - n_batches + 1):end]),
                 "\n    f =     ",
@@ -308,8 +377,10 @@ function train_network!(filter::NormalizingFlowFilter, Xs, Ys; log_data=nothing)
                     loss[(end - n_batches + 1):end] .+ logdet_train[(end - n_batches + 1):end]
                 ),
                 "\nValidation:",
-                "\n    f l2 =  ",
+                "\n    negative log p(z) =  ",
                 loss_test[end],
+                "\n    weighted l2 =  ",
+                loss_weighted_misfit_valid[end],
                 "\n    lgdet = ",
                 logdet_test[end],
                 "\n    f =     ",
@@ -326,11 +397,30 @@ function train_network!(filter::NormalizingFlowFilter, Xs, Ys; log_data=nothing)
             early_stop = false
             for (de, prop, delta) in cfg.early_stopping_training_loss.look_backs
                 if e > de
-                    # Check for loss not improving for some number of epochs.
-                    loss_difference = loss_total_train_epochs[end] .- loss_total_train_epochs[end-de:end-1]
-                    if mean(loss_difference .>= delta) > prop
-                        early_stop = true
-                        break
+                    cur_loss = loss_total_train_epochs[end]
+                    if prop == -1
+                        # For instance, for de=200 and delta=-1f-6, find the most recent epoch where the loss is worse by at least 1f-6.
+                        # If that is more than 200 epochs away, then we'll stop now, because the loss isn't improving fast enough.
+                        most_recent_epoch = let
+                            ep = 0
+                            for (li, l) in Iterators.reverse(enumerate(loss_total_train_epochs))
+                                if l >= cur_loss - delta
+                                    ep = li
+                                    break
+                                end
+                            end
+                            ep
+                        end
+                        if e - most_recent_epoch > de 
+                            early_stop = true
+                            break
+                        end
+                    else
+                        # Check for loss not improving for some number of epochs.
+                        if mean(cur_loss - delta .>= loss_total_train_epochs[end-de:end-1]) > prop
+                            early_stop = true
+                            break
+                        end
                     end
                 end
             end
@@ -344,11 +434,30 @@ function train_network!(filter::NormalizingFlowFilter, Xs, Ys; log_data=nothing)
                 early_stop = false
                 for (de, prop, delta) in cfg.early_stopping_validation_loss.look_backs
                     if e > de
-                        # Check for loss not improving for some number of epochs.
-                        loss_difference = loss_total_valid_epochs[end] .- loss_total_valid_epochs[end-de:end-1]
-                        if mean(loss_difference .>= delta) > prop
-                            early_stop = true
-                            break
+                        cur_loss = loss_total_valid_epochs[end]
+                        if prop == -1
+                            # For instance, for de=200 and delta=-1f-6, find the most recent epoch where the loss is worse by at least 1f-6.
+                            # If that is more than 200 epochs away, then we'll stop now, because the loss isn't improving fast enough.
+                            most_recent_epoch = let
+                                ep = 0
+                                for (li, l) in Iterators.reverse(enumerate(loss_total_valid_epochs))
+                                    if l >= cur_loss - delta
+                                        ep = li
+                                        break
+                                    end
+                                end
+                                ep
+                            end
+                            if e - most_recent_epoch > de 
+                                early_stop = true
+                                break
+                            end
+                        else
+                            # Check for loss not improving for some number of epochs.
+                            if mean(cur_loss - delta .>= loss_total_valid_epochs[end-de:end-1]) > prop
+                                early_stop = true
+                                break
+                            end
                         end
                     end
                 end
@@ -367,7 +476,7 @@ function train_network!(filter::NormalizingFlowFilter, Xs, Ys; log_data=nothing)
                 :loss_total_batches => loss .+ logdet_train,
                 :ssim_cm => ssim,
                 :l2_cm => l2_cm,
-                :split => train_split,
+                :loss_weighted_misfit_train => loss_weighted_misfit_train,
             ),
             :testing => Dict{Symbol,Any}(
                 :loss => loss_test,
@@ -375,13 +484,13 @@ function train_network!(filter::NormalizingFlowFilter, Xs, Ys; log_data=nothing)
                 :loss_total => loss_test .+ logdet_test,
                 :ssim_cm => ssim_test,
                 :l2_cm => l2_cm_test,
-                :split => test_split,
+                :loss_weighted_misfit_valid => loss_weighted_misfit_valid,
             ),
         )
     end
 
     if cfg.save_best
-        InvertibleNetworks.set_params!(filter.coupling_network_device, best_params |> device)
+        InvertibleNetworks.set_params!(coupling_network_device, best_params |> device)
     end
     return nothing
 end

@@ -10,21 +10,27 @@ using InvertibleNetworks: InvertibleNetworks,
 using Flux: Flux, ClipNorm, cpu, gpu
 
 export NormalizingFlowFilter, NetworkConditionalCouplingStack,
-    NetworkConditionalGlow, create_optimizer, reset_optimizer, cpu, gpu, get_data, set_data!, get_activation
+    NetworkConditionalGlow, NormalizingFlowOptimizer,
+    create_optimizer, cpu, gpu, get_data, set_data!, get_activation
 
-struct NormalizingFlowFilter
+mutable struct NormalizingFlowFilter
     coupling_network
     coupling_network_device
+    coupling_network_generator
+    target_distribution
+    state_shape
+    obs_shape
     opt
     device
     training_config
 end
 
 function NormalizingFlowFilter(
-    coupling_network, optimizer; device=cpu, training_config=TrainingOptions()
+    coupling_network_generator, target_distribution, state_shape, obs_shape, optimizer; device=cpu, training_config=TrainingOptions()
 )
+    coupling_network = coupling_network_generator()
     return NormalizingFlowFilter(
-        coupling_network, device(coupling_network), optimizer, device, training_config
+        coupling_network, device(coupling_network), coupling_network_generator, target_distribution, state_shape, obs_shape, optimizer, device, training_config
     )
 end
 
@@ -130,12 +136,14 @@ function get_coupling_operator_generator(opt::AffineCouplingOperatorOptions; kwa
     shift_activation = get_activation(opt.shift_activation)
     shift_cond_scalar = opt.shift_cond_scalar
     joint_correlation = opt.joint_correlation
+    just_shift = opt.just_shift
     return function (inv_shape, sub_shape)
         return AffineCouplingOperator(;
             scale_activation,
             shift_activation,
             shift_cond_scalar,
             joint_correlation,
+            just_shift,
         )
     end
 end
@@ -174,6 +182,7 @@ function InvertibleNetworks.NetworkConditionalCouplingStack(in_shape, cond_shape
         subnetwork_generator,
         prenetwork_generator,
         invertible_coupling_operator_generator,
+        coupling_layer_params = (; split = config.coupling_network.split),
     )
 end
 
@@ -235,7 +244,14 @@ function reset_network(network::NetworkConditionalCouplingStack)
     error("not implemented")
 end
 
+struct NormalizingFlowOptimizer
+    flux
+    config
+end
+
 function create_optimizer(config)
+    opts = []
+    push!(opts, ClipNorm(config.clipnorm_val))
     if config.method == "adam"
         a = Flux.Optimise.Adam(config.lr, config.momentum, config.epsilon)
     elseif config.method == "descent"
@@ -243,21 +259,25 @@ function create_optimizer(config)
     else
         error("Unknown optimizer method: $(config.method)")
     end
-    return Flux.Optimiser(ClipNorm(config.clipnorm_val), a)
+    push!(opts, a)
+    push!(opts, get_weight_decay(config.weight_decay))
+    push!(opts, get_learning_rate_decay(config.learning_rate_decay))
+    flux = Flux.Optimiser([o for o in opts if !isnothing(o)]...)
+    return NormalizingFlowOptimizer(flux, config)
 end
 
-function reset_optimizer(opt)
-    c, a = opt.os
-    @assert c isa ClipNorm
-    c = ClipNorm(c.thresh)
-    if a isa Flux.Optimise.Adam
-        a = Flux.Optimise.Adam(a.eta, a.beta, a.epsilon)
-    elseif a isa Flux.Optimise.Descent
-        a = Flux.Optimise.Descent(a.eta)
-    else
-        error("Unknown optimizer type: $(typeof(opt))")
+function get_weight_decay(opt::WeightDecayOptions)
+    if opt.active
+        return Flux.WeightDecay(opt.factor)
     end
-    return Flux.Optimiser(c, a)
+    return nothing
+end
+
+function get_learning_rate_decay(opt::LearningRateDecayOptions)
+    if opt.active
+        return Flux.ExpDecay(1.0, opt.factor, opt.step, opt.minimum)
+    end
+    return nothing
 end
 
 function get_data(filter::NormalizingFlowFilter)

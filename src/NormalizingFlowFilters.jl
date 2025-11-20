@@ -6,6 +6,7 @@ module NormalizingFlowFilters
 
 include("options.jl")
 include("types.jl")
+include("targets.jl")
 include("activations.jl")
 include("assimilate_data.jl")
 include("train.jl")
