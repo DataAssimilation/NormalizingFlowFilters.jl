@@ -1,10 +1,12 @@
 [deps]
 CairoMakie = "13f3f980-e62b-5c42-98c6-ff1f3baf88f0"
+Configurations = "5218b696-f38b-4ac9-8b61-a12ec717816d"
 Flux = "587475ba-b771-5e3f-ad9e-33799f191a9c"
 GLMakie = "e9467ef8-e4e7-5192-8a1a-b1aee30e663a"
 JLD2 = "033835bb-8acc-5ee8-8aae-3f567f8a3819"
 Literate = "98b081ad-f1c9-55d3-8b20-4c87d4299306"
 Logging = "56ddb016-857b-54e1-b83d-db4d58db5568"
+MLUtils = "f1d291b0-491e-4a28-83b9-f70985020b54"
 NormalizingFlowFilters = "bdff3154-b03d-49d9-ae6e-73db1909c910"
 PairPlots = "43a3c2be-4208-490b-832a-a21dcd55d7da"
 Printf = "de0858da-6303-5e67-8744-51eddeeeb8d7"
