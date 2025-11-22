@@ -68,8 +68,8 @@ function get_loss(G, X_batch, Y_batch; device=gpu, batch_size, N, target_distrib
 end
 
 function add_training_noise(cfg::UnitGaussianNoiseOptions, X::AbstractArray{T, Nx}, Y::AbstractArray{T, Ny}) where {T, Nx, Ny}
-    X = X .+ cfg.x * randn(T, size(X))
-    Y = Y .+ cfg.y * randn(T, size(Y))
+    X = X .+ T.(cfg.x) * randn(T, size(X))
+    Y = Y .+ T.(cfg.y) * randn(T, size(Y))
     return X, Y
 end
 
@@ -87,12 +87,14 @@ function add_training_noise(cfg::CovarianceInflationGaussianNoiseOptions, X::Abs
     Nb = size(X)[end]
     x_scale = cfg.inflation / sqrt(Nb - 1)
     y_scale = cfg.inflation / sqrt(Nb - 1)
-    X = X .+ (X .- mean(X; dims=Nx)) .* x_scale .+ cfg.x * randn(T, size(X))
-    Y = Y .+ (Y .- mean(Y; dims=Ny)) .* y_scale .+ cfg.y * randn(T, size(Y))
+    X = X .+ (X .- mean(X; dims=Nx)) .* T.(x_scale) .+ T.(cfg.x) * randn(T, size(X))
+    Y = Y .+ (Y .- mean(Y; dims=Ny)) .* T.(y_scale) .+ T.(cfg.y) * randn(T, size(Y))
     return X, Y
 end
 
 function train_network!(filter::NormalizingFlowFilter, Xs, Ys; log_data=nothing)
+    Xs = Float32.(Xs)
+    Ys = Float32.(Ys)
     target_distribution = filter.target_distribution
     device = filter.device
     cfg = filter.training_config
@@ -123,6 +125,7 @@ function train_network!(filter::NormalizingFlowFilter, Xs, Ys; log_data=nothing)
     X_test = obsview(Xs, test_split)
     Y_test = obsview(Ys, test_split)
 
+    filter.coupling_network_device = filter.coupling_network_device |> device
     if isnothing(cfg.hypersearcher)
         train_network!(filter.coupling_network_device, target_distribution, cfg, opt, device, X_train, X_test, Y_train, Y_test, log_data)
         log_data[:coupling_network][:training][:split] = train_split
@@ -258,7 +261,7 @@ function train_network!(coupling_network_device, target_distribution, cfg, opt, 
 
                 # Set gradients of flow and summary network
                 ΔZx = dnlogpz_dz
-                coupling_network_device.backward(ΔZx / n_batch, Zx, Zy)
+                coupling_network_device.backward(Float32.(ΔZx) / n_batch, Zx, Zy)
 
                 for p in get_params(coupling_network_device)
                     if isnothing(p.grad)
