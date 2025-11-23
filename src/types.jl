@@ -281,7 +281,7 @@ function get_learning_rate_decay(opt::LearningRateDecayOptions)
 end
 
 function get_data(filter::NormalizingFlowFilter)
-    return InvertibleNetworks.get_params(filter.coupling_network_device)
+    return InvertibleNetworks.get_params(filter.coupling_network_device) |> cpu
 end
 
 function set_data!(filter::NormalizingFlowFilter, params)
